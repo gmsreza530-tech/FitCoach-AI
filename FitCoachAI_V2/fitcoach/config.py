@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN","").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY","").strip()
-GROQ_MODEL = os.getenv("GROQ_MODEL","llama-3.3-70b-versatile").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL","openai/gpt-oss-120b").strip()
 COACH_IDS = {int(x) for x in os.getenv("COACH_IDS","").split(",") if x.strip().isdigit()}
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS","").split(",") if x.strip().isdigit()}
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH","data/fitcoach.db"))
