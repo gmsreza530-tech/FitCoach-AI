@@ -43,9 +43,13 @@ async def main():
     bot=Bot(BOT_TOKEN); dp=Dispatcher(storage=MemoryStorage())
 
     @dp.message(CommandStart())
-    async def start(m:Message,s:FSMContext):
-        await s.clear()
-        await m.answer("به FitCoach AI خوش آمدی. 🏋️\nابتدا پروفایل را تکمیل کن. این ربات ابزار آموزشی است و جایگزین پزشک نیست.",reply_markup=kb())
+    async def start(m: Message, state: FSMContext):
+    await state.clear()
+    await m.answer(
+        "به FitCoach AI خوش آمدی. 🏋️\n"
+        "ابتدا پروفایل را تکمیل کن. این ربات ابزار آموزشی است و جایگزین پزشک نیست.",
+        reply_markup=kb()
+    )
 
     @dp.message(Command("cancel"))
     async def cancel(m:Message,s:FSMContext):
