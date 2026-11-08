@@ -43,13 +43,13 @@ async def main():
     bot=Bot(BOT_TOKEN); dp=Dispatcher(storage=MemoryStorage())
 
     @dp.message(CommandStart())
-async def start(m: Message, state: FSMContext):
-    await state.clear()
-    await m.answer(
+    async def start(m: Message, state: FSMContext):
+        await state.clear()
+        await m.answer(
         "به FitCoach AI خوش آمدی. 🏋️\n"
         "ابتدا پروفایل را تکمیل کن. این ربات ابزار آموزشی است و جایگزین پزشک نیست.",
         reply_markup=kb()
-    ))
+        )
 
     @dp.message(Command("cancel"))
     async def cancel(m:Message,s:FSMContext):
@@ -60,44 +60,44 @@ async def start(m: Message, state: FSMContext):
         await s.clear(); await s.set_state(Form.name); await m.answer("نام یا نام مستعار؟")
 
     @dp.message(Form.name)
-    async def f1(m,s): await s.update_data(name=(m.text or "")[:80]); await s.set_state(Form.age); await m.answer("سن؟ (۱۳ تا ۹۰)")
+    async def f1(m: Message, s: FSMContext): await s.update_data(name=(m.text or "")[:80]); await s.set_state(Form.age); await m.answer("سن؟ (۱۳ تا ۹۰)")
     @dp.message(Form.age)
-    async def f2(m,s):
+    async def f2(m: Message, s: FSMContext):
         try: n=int(m.text)
         except: n=0
         if not 13<=n<=90: return await m.answer("سن معتبر وارد کن.")
         await s.update_data(age=n); await s.set_state(Form.sex); await m.answer("جنسیت (اختیاری): مرد / زن / ترجیح می‌دهم نگویم")
     @dp.message(Form.sex)
-    async def f3(m,s): await s.update_data(sex=(m.text or "")[:50]); await s.set_state(Form.height); await m.answer("قد به سانتی‌متر؟")
+    async def f3(m: Message, s: FSMContext): await s.update_data(sex=(m.text or "")[:50]); await s.set_state(Form.height); await m.answer("قد به سانتی‌متر؟")
     @dp.message(Form.height)
-    async def f4(m,s):
+    async def f4(m: Message, s: FSMContext):
         try: n=float(m.text.replace(",",".")); assert 100<=n<=230
         except: return await m.answer("قد معتبر بین ۱۰۰ تا ۲۳۰ وارد کن.")
         await s.update_data(height=n); await s.set_state(Form.weight); await m.answer("وزن به کیلوگرم؟")
     @dp.message(Form.weight)
-    async def f5(m,s):
+    async def f5(m: Message, s: FSMContext):
         try: n=float(m.text.replace(",",".")); assert 25<=n<=300
         except: return await m.answer("وزن معتبر وارد کن.")
         await s.update_data(weight=n); await s.set_state(Form.goal); await m.answer("هدف: افزایش حجم / کاهش چربی / قدرت / تناسب / آمادگی ورزشی")
     @dp.message(Form.goal)
-    async def f6(m,s): await s.update_data(goal=(m.text or "")[:150]); await s.set_state(Form.experience); await m.answer("سابقه و سطح تمرینت؟ مبتدی / متوسط / پیشرفته + توضیح")
+    async def f6(m: Message, s: FSMContext): await s.update_data(goal=(m.text or "")[:150]); await s.set_state(Form.experience); await m.answer("سابقه و سطح تمرینت؟ مبتدی / متوسط / پیشرفته + توضیح")
     @dp.message(Form.experience)
-    async def f7(m,s): await s.update_data(experience=(m.text or "")[:250]); await s.set_state(Form.equipment); await m.answer("امکانات: باشگاه کامل / دمبل خانه / وزن بدن / سایر")
+    async def f7(m: Message, s: FSMContext): await s.update_data(experience=(m.text or "")[:250]); await s.set_state(Form.equipment); await m.answer("امکانات: باشگاه کامل / دمبل خانه / وزن بدن / سایر")
     @dp.message(Form.equipment)
-    async def f8(m,s): await s.update_data(equipment=(m.text or "")[:150]); await s.set_state(Form.days); await m.answer("هفته‌ای چند جلسه می‌توانی تمرین کنی؟ ۱ تا ۷")
+    async def f8(m: Message, s: FSMContext): await s.update_data(equipment=(m.text or "")[:150]); await s.set_state(Form.days); await m.answer("هفته‌ای چند جلسه می‌توانی تمرین کنی؟ ۱ تا ۷")
     @dp.message(Form.days)
-    async def f9(m,s):
+    async def f9(m: Message, s: FSMContext):
         try: n=int(m.text); assert 1<=n<=7
         except: return await m.answer("عدد ۱ تا ۷ وارد کن.")
         await s.update_data(days=n); await s.set_state(Form.recovery); await m.answer("وضعیت خواب و ریکاوری؟ (مثلاً ۷ ساعت خواب، استرس متوسط)")
     @dp.message(Form.recovery)
-    async def f10(m,s): await s.update_data(recovery=(m.text or "")[:250]); await s.set_state(Form.limitations); await m.answer("تمام آسیب‌ها، بیماری‌ها یا محدودیت‌های پزشکی را با کاما جدا کن. اگر نداری بنویس: خیر")
+    async def f10(m: Message, s: FSMContext): await s.update_data(recovery=(m.text or "")[:250]); await s.set_state(Form.limitations); await m.answer("تمام آسیب‌ها، بیماری‌ها یا محدودیت‌های پزشکی را با کاما جدا کن. اگر نداری بنویس: خیر")
     @dp.message(Form.limitations)
-    async def f11(m,s): await s.update_data(limitations=(m.text or "")[:700]); await s.set_state(Form.medication); await m.answer("داروی منظم مصرف می‌کنی؟ خیر / بله + نام دارو (در صورت تمایل)")
+    async def f11(m: Message, s: FSMContext): await s.update_data(limitations=(m.text or "")[:700]); await s.set_state(Form.medication); await m.answer("داروی منظم مصرف می‌کنی؟ خیر / بله + نام دارو (در صورت تمایل)")
     @dp.message(Form.medication)
-    async def f12(m,s): await s.update_data(medication=(m.text or "")[:350]); await s.set_state(Form.notes); await m.answer("توضیحات تکمیلی، حساسیت غذایی یا حرکات ممنوع؟ اگر نداری: ندارد")
+    async def f12(m: Message, s: FSMContext): await s.update_data(medication=(m.text or "")[:350]); await s.set_state(Form.notes); await m.answer("توضیحات تکمیلی، حساسیت غذایی یا حرکات ممنوع؟ اگر نداری: ندارد")
     @dp.message(Form.notes)
-    async def f13(m,s):
+    async def f13(m: Message, s: FSMContext):
         await s.update_data(notes=(m.text or "")[:700]); d=await s.get_data(); save_profile(m.from_user.id,d); await s.clear()
         await m.answer("پروفایل ذخیره شد. اکنون می‌توانی از امکانات استفاده کنی.",reply_markup=kb())
 
@@ -131,9 +131,9 @@ async def start(m: Message, state: FSMContext):
     async def food(m): await generate(m,"nutrition","راهنمای تغذیه عمومی و قابل اجرا برای هدف من بده؛ نمونه وعده و منابع پروتئین ارائه کن. رژیم افراطی نده.")
 
     @dp.message(F.text=="💬 سؤال از مربی")
-    async def ask_start(m,s): await s.set_state(QuestionForm.question); await m.answer("سؤالت را در یک پیام بفرست.")
+    async def ask_start(m: Message, s: FSMContext): await s.set_state(QuestionForm.question); await m.answer("سؤالت را در یک پیام بفرست.")
     @dp.message(QuestionForm.question)
-    async def ask_user(m,s):
+    async def ask_user(m: Message, s: FSMContext):
         await s.clear(); p=profile(m.from_user.id)
         if not p: return await m.answer("ابتدا پروفایل را تکمیل کن.")
         coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
@@ -141,9 +141,9 @@ async def start(m: Message, state: FSMContext):
         await m.answer(ans[:3900])
 
     @dp.message(F.text=="📈 ثبت پیشرفت")
-    async def progress_start(m,s): await s.set_state(ProgressForm.entry); await m.answer("وزن، رکوردها، تعداد تکرار، احساس تمرین یا تغییراتت را بنویس.")
+    async def progress_start(m: Message, s: FSMContext): await s.set_state(ProgressForm.entry); await m.answer("وزن، رکوردها، تعداد تکرار، احساس تمرین یا تغییراتت را بنویس.")
     @dp.message(ProgressForm.entry)
-    async def progress_save(m,s):
+    async def progress_save(m: Message, s: FSMContext):
         add_progress(m.from_user.id,(m.text or "")[:1000]); await s.clear(); await m.answer("پیشرفت ثبت شد.")
     @dp.message(F.text=="📚 برنامه‌های قبلی")
     async def old_programs(m):
@@ -155,57 +155,57 @@ async def start(m: Message, state: FSMContext):
 
     # Structured workout logging
     @dp.message(F.text=="🏃 ثبت تمرین")
-    async def workout_log_start(m,s):
+    async def workout_log_start(m: Message, s: FSMContext):
         if not profile(m.from_user.id): return await m.answer("ابتدا پروفایل را تکمیل کن.")
         await s.clear(); await s.set_state(WorkoutLogForm.exercise); await m.answer("نام حرکت؟")
     @dp.message(WorkoutLogForm.exercise)
-    async def wl1(m,s): await s.update_data(exercise=(m.text or "")[:100]); await s.set_state(WorkoutLogForm.sets); await m.answer("چند ست؟")
+    async def wl1(m: Message, s: FSMContext): await s.update_data(exercise=(m.text or "")[:100]); await s.set_state(WorkoutLogForm.sets); await m.answer("چند ست؟")
     @dp.message(WorkoutLogForm.sets)
-    async def wl2(m,s):
+    async def wl2(m: Message, s: FSMContext):
         try: v=int(m.text); assert 1<=v<=30
         except: return await m.answer("عدد ست باید بین ۱ تا ۳۰ باشد.")
         await s.update_data(sets=v); await s.set_state(WorkoutLogForm.reps); await m.answer("تکرار هر ست؟ مثلاً ۱۰،۱۰،۸")
     @dp.message(WorkoutLogForm.reps)
-    async def wl3(m,s): await s.update_data(reps=(m.text or "")[:80]); await s.set_state(WorkoutLogForm.weight); await m.answer("وزنه به کیلوگرم؟ برای وزن بدن ۰ بنویس.")
+    async def wl3(m: Message, s: FSMContext): await s.update_data(reps=(m.text or "")[:80]); await s.set_state(WorkoutLogForm.weight); await m.answer("وزنه به کیلوگرم؟ برای وزن بدن ۰ بنویس.")
     @dp.message(WorkoutLogForm.weight)
-    async def wl4(m,s):
+    async def wl4(m: Message, s: FSMContext):
         try: v=float(m.text.replace(",",".")); assert 0<=v<=1000
         except: return await m.answer("وزنه معتبر وارد کن.")
         await s.update_data(weight=v); await s.set_state(WorkoutLogForm.rir); await m.answer("RIR چند بود؟ عدد ۰ تا 10 یا نامشخص")
     @dp.message(WorkoutLogForm.rir)
-    async def wl5(m,s):
+    async def wl5(m: Message, s: FSMContext):
         try: v=None if "نامشخص" in m.text else float(m.text.replace(",",".")); assert v is None or 0<=v<=10
         except: return await m.answer("RIR باید بین ۰ تا ۱۰ یا نامشخص باشد.")
         await s.update_data(rir=v); await s.set_state(WorkoutLogForm.notes); await m.answer("یادداشت یا میزان درد/ناراحتی؟ اگر نداری بنویس خیر.")
     @dp.message(WorkoutLogForm.notes)
-    async def wl6(m,s):
+    async def wl6(m: Message, s: FSMContext):
         d=await s.get_data(); add_workout(m.from_user.id,d["exercise"],d["sets"],d["reps"],d["weight"],d["rir"],(m.text or "")[:300]); await s.clear(); await m.answer("✅ تمرین ثبت شد.")
 
     # Nutrition log
     @dp.message(F.text=="🍽 ثبت غذا")
-    async def food_log_start(m,s):
+    async def food_log_start(m: Message, s: FSMContext):
         await s.clear(); await s.set_state(NutritionForm.meal); await m.answer("نام وعده یا غذا؟")
     @dp.message(NutritionForm.meal)
-    async def nf1(m,s): await s.update_data(meal=(m.text or "")[:100]); await s.set_state(NutritionForm.calories); await m.answer("کالری تقریبی؟")
+    async def nf1(m: Message, s: FSMContext): await s.update_data(meal=(m.text or "")[:100]); await s.set_state(NutritionForm.calories); await m.answer("کالری تقریبی؟")
     async def nutrition_number(m,s,key,next_state,prompt,maximum):
         try: v=float(m.text.replace(",",".")); assert 0<=v<=maximum
         except: return await m.answer(f"عدد معتبر بین صفر تا {maximum} وارد کن.")
         await s.update_data(**{key:v}); await s.set_state(next_state); await m.answer(prompt)
     @dp.message(NutritionForm.calories)
-    async def nf2(m,s): await nutrition_number(m,s,"calories",NutritionForm.protein,"پروتئین به گرم؟",10000)
+    async def nf2(m: Message, s: FSMContext): await nutrition_number(m,s,"calories",NutritionForm.protein,"پروتئین به گرم؟",10000)
     @dp.message(NutritionForm.protein)
-    async def nf3(m,s): await nutrition_number(m,s,"protein",NutritionForm.carbs,"کربوهیدرات به گرم؟",10000)
+    async def nf3(m: Message, s: FSMContext): await nutrition_number(m,s,"protein",NutritionForm.carbs,"کربوهیدرات به گرم؟",10000)
     @dp.message(NutritionForm.carbs)
-    async def nf4(m,s): await nutrition_number(m,s,"carbs",NutritionForm.fat,"چربی به گرم؟",10000)
+    async def nf4(m: Message, s: FSMContext): await nutrition_number(m,s,"carbs",NutritionForm.fat,"چربی به گرم؟",10000)
     @dp.message(NutritionForm.fat)
-    async def nf5(m,s): await nutrition_number(m,s,"fat",NutritionForm.notes,"یادداشت اختیاری؟",10000)
+    async def nf5(m: Message, s: FSMContext): await nutrition_number(m,s,"fat",NutritionForm.notes,"یادداشت اختیاری؟",10000)
     @dp.message(NutritionForm.notes)
-    async def nf6(m,s):
+    async def nf6(m: Message, s: FSMContext):
         d=await s.get_data(); add_nutrition(m.from_user.id,d["meal"],d["calories"],d["protein"],d["carbs"],d["fat"],(m.text or "")[:250]); await s.clear(); await m.answer("✅ وعده غذایی ثبت شد.")
 
     # Body measurements
     @dp.message(F.text=="⚖️ اندازه‌گیری بدن")
-    async def measure_start(m,s):
+    async def measure_start(m: Message, s: FSMContext):
         await s.clear(); await s.set_state(MeasurementForm.weight); await m.answer("وزن فعلی به کیلوگرم؟")
     async def optional_measure(m,s,key,next_state,prompt,low,high):
         t=(m.text or "").strip()
@@ -215,15 +215,15 @@ async def start(m: Message, state: FSMContext):
             except: return await m.answer(f"عدد بین {low} تا {high} یا «ندارم» وارد کن.")
         await s.update_data(**{key:v}); await s.set_state(next_state); await m.answer(prompt)
     @dp.message(MeasurementForm.weight)
-    async def ms1(m,s): await optional_measure(m,s,"weight",MeasurementForm.waist,"دور کمر به سانتی‌متر؟ یا ندارم",25,250)
+    async def ms1(m: Message, s: FSMContext): await optional_measure(m,s,"weight",MeasurementForm.waist,"دور کمر به سانتی‌متر؟ یا ندارم",25,250)
     @dp.message(MeasurementForm.waist)
-    async def ms2(m,s): await optional_measure(m,s,"waist",MeasurementForm.chest,"دور سینه؟ یا ندارم",25,250)
+    async def ms2(m: Message, s: FSMContext): await optional_measure(m,s,"waist",MeasurementForm.chest,"دور سینه؟ یا ندارم",25,250)
     @dp.message(MeasurementForm.chest)
-    async def ms3(m,s): await optional_measure(m,s,"chest",MeasurementForm.arm,"دور بازو؟ یا ندارم",10,100)
+    async def ms3(m: Message, s: FSMContext): await optional_measure(m,s,"chest",MeasurementForm.arm,"دور بازو؟ یا ندارم",10,100)
     @dp.message(MeasurementForm.arm)
-    async def ms4(m,s): await optional_measure(m,s,"arm",MeasurementForm.thigh,"دور ران؟ یا ندارم",15,150)
+    async def ms4(m: Message, s: FSMContext): await optional_measure(m,s,"arm",MeasurementForm.thigh,"دور ران؟ یا ندارم",15,150)
     @dp.message(MeasurementForm.thigh)
-    async def ms5(m,s):
+    async def ms5(m: Message, s: FSMContext):
         d=await s.get_data(); t=(m.text or "").strip()
         try: thigh=None if t in ("-","ندارم","خالی") else float(t.replace(",",".")); assert thigh is None or 15<=thigh<=150
         except: return await m.answer("عدد معتبر یا «ندارم» وارد کن.")
@@ -231,30 +231,30 @@ async def start(m: Message, state: FSMContext):
 
     # Daily check-in
     @dp.message(F.text=="🛌 چک‌این روزانه")
-    async def ci_start(m,s):
+    async def ci_start(m: Message, s: FSMContext):
         await s.clear(); await s.set_state(CheckinForm.sleep); await m.answer("دیشب چند ساعت خوابیدی؟")
     @dp.message(CheckinForm.sleep)
-    async def ci1(m,s):
+    async def ci1(m: Message, s: FSMContext):
         try: v=float(m.text.replace(",",".")); assert 0<=v<=24
         except: return await m.answer("عدد ساعت خواب بین صفر تا ۲۴ وارد کن.")
         await s.update_data(sleep=v); await s.set_state(CheckinForm.energy); await m.answer("انرژی امروز از ۱ تا ۵؟")
     @dp.message(CheckinForm.energy)
-    async def ci2(m,s):
+    async def ci2(m: Message, s: FSMContext):
         try: v=int(m.text); assert 1<=v<=5
         except: return await m.answer("عدد ۱ تا ۵ وارد کن.")
         await s.update_data(energy=v); await s.set_state(CheckinForm.soreness); await m.answer("کوفتگی/درد عضلانی از ۱ تا ۵؟ اگر درد تیز یا غیرعادی داری توضیح بده.")
     @dp.message(CheckinForm.soreness)
-    async def ci3(m,s):
+    async def ci3(m: Message, s: FSMContext):
         try: v=int(m.text); assert 1<=v<=5
         except: return await m.answer("عدد ۱ تا ۵ وارد کن.")
         await s.update_data(soreness=v); await s.set_state(CheckinForm.adherence); await m.answer("پایبندی به برنامه امروز از ۱ تا ۵؟")
     @dp.message(CheckinForm.adherence)
-    async def ci4(m,s):
+    async def ci4(m: Message, s: FSMContext):
         try: v=int(m.text); assert 1<=v<=5
         except: return await m.answer("عدد ۱ تا ۵ وارد کن.")
         await s.update_data(adherence=v); await s.set_state(CheckinForm.notes); await m.answer("یادداشت اختیاری؛ اگر نداری بنویس خیر.")
     @dp.message(CheckinForm.notes)
-    async def ci5(m,s):
+    async def ci5(m: Message, s: FSMContext):
         d=await s.get_data(); add_checkin(m.from_user.id,d["sleep"],d["energy"],d["soreness"],d["adherence"],(m.text or "")[:250]); await s.clear()
         warning="\nاگر درد شدید، تیز، رو به افزایش یا همراه با تورم/بی‌حسی است، تمرین را متوقف و ارزیابی تخصصی دریافت کن." if d["soreness"]>=4 else ""
         await m.answer("✅ چک‌این ثبت شد."+warning)
@@ -278,11 +278,11 @@ async def start(m: Message, state: FSMContext):
     async def privacy(m):
         await m.answer("اطلاعات پروفایل و سوابق برای ارائه خدمات ذخیره می‌شوند. برای درخواست حذف داده‌های حساب، دستور /delete_my_data را بزن. فایل‌های ویدئو در پردازش موقت حذف می‌شوند.")
     @dp.message(Command("delete_my_data"))
-    async def delete_data(m,s):
+    async def delete_data(m: Message, s: FSMContext):
         await s.set_state(DeleteForm.confirm)
         await m.answer("حذف اطلاعات قابل بازگشت نیست. برای تأیید دقیقاً بنویس: حذف اطلاعات من")
     @dp.message(DeleteForm.confirm)
-    async def delete_confirm(m,s):
+    async def delete_confirm(m: Message, s: FSMContext):
         await s.clear()
         if (m.text or "").strip() != "حذف اطلاعات من":
             return await m.answer("حذف لغو شد.")
