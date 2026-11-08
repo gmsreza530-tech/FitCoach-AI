@@ -1,6 +1,7 @@
 from groq import Groq
 from fitcoach.config import GROQ_API_KEY,GROQ_MODEL
 from fitcoach.db import search_knowledge
+import logging
 
 SYSTEM = """
 تو FitCoach AI، دستیار تمرین و تغذیه زیر نظر مربی هستی.
