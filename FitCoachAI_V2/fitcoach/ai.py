@@ -44,5 +44,9 @@ def ask(profile,question,coach_id):
             {"role":"user","content":f"پروفایل ورزشکار:\n{p}\n\nدانش مرتبط مربی:\n{ktext}\n\nدرخواست:\n{question}"}
           ])
         return r.choices[0].message.content or "پاسخی دریافت نشد."
-    except Exception as e:
-        return f"خطا در سرویس AI ({type(e).__name__}). کلید API، مدل و Runtime Logs بررسی شوند."
+       except Exception as e:
+        logging.exception("Groq API request failed")
+        return (
+            f"خطا در سرویس AI: {type(e).__name__}\n"
+            "جزئیات خطا در Runtime Logs ثبت شده است."
+        )
