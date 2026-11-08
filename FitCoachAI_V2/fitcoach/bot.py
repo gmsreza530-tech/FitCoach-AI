@@ -1,0 +1,422 @@
+import asyncio, tempfile
+from pathlib import Path
+from aiogram import Bot,Dispatcher,F
+from aiogram.filters import Command,CommandStart
+from aiogram.types import Message,ReplyKeyboardMarkup,KeyboardButton,FSInputFile
+from aiogram.fsm.state import StatesGroup,State
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from fitcoach.config import BOT_TOKEN,COACH_IDS,ADMIN_IDS,APPROVAL_MODE,UPLOAD_DIR,SUBSCRIPTION_DAYS,SUBSCRIPTION_PLAN_LIMIT,FREE_MODE
+from fitcoach.db import *
+from fitcoach.ai import ask
+from fitcoach.excel_import import import_excel
+from fitcoach.video_analysis import analyze_video
+
+class Form(StatesGroup):
+    name=State(); age=State(); sex=State(); height=State(); weight=State()
+    goal=State(); experience=State(); equipment=State(); days=State()
+    recovery=State(); limitations=State(); medication=State(); notes=State()
+class ProgressForm(StatesGroup): entry=State()
+class QuestionForm(StatesGroup): question=State()
+class WorkoutLogForm(StatesGroup): exercise=State(); sets=State(); reps=State(); weight=State(); rir=State(); notes=State()
+class NutritionForm(StatesGroup): meal=State(); calories=State(); protein=State(); carbs=State(); fat=State(); notes=State()
+class MeasurementForm(StatesGroup): weight=State(); waist=State(); chest=State(); arm=State(); thigh=State()
+class CheckinForm(StatesGroup): sleep=State(); energy=State(); soreness=State(); adherence=State(); notes=State()
+class DeleteForm(StatesGroup): confirm=State()
+
+def kb():
+    return ReplyKeyboardMarkup(keyboard=[
+      [KeyboardButton(text="📝 تکمیل پروفایل"),KeyboardButton(text="👤 پروفایل من")],
+      [KeyboardButton(text="🏋️ برنامه تمرین"),KeyboardButton(text="🥗 راهنمای تغذیه")],
+      [KeyboardButton(text="💬 سؤال از مربی"),KeyboardButton(text="📈 ثبت پیشرفت")],
+      [KeyboardButton(text="🎥 تحلیل فرم حرکت"),KeyboardButton(text="📚 برنامه‌های قبلی")],
+      [KeyboardButton(text="🏃 ثبت تمرین"),KeyboardButton(text="🍽 ثبت غذا")],
+      [KeyboardButton(text="⚖️ اندازه‌گیری بدن"),KeyboardButton(text="🛌 چک‌این روزانه")],
+      [KeyboardButton(text="📊 گزارش من"),KeyboardButton(text="ℹ️ راهنما")]
+    ],resize_keyboard=True)
+
+def is_coach(uid): return uid in COACH_IDS or uid in ADMIN_IDS
+
+async def main():
+    if not BOT_TOKEN: raise RuntimeError("BOT_TOKEN is missing")
+    init(); UPLOAD_DIR.mkdir(exist_ok=True)
+    bot=Bot(BOT_TOKEN); dp=Dispatcher(storage=MemoryStorage())
+
+    @dp.message(CommandStart())
+    async def start(m:Message,s:FSMContext):
+        await s.clear()
+        await m.answer("به FitCoach AI خوش آمدی. 🏋️\nابتدا پروفایل را تکمیل کن. این ربات ابزار آموزشی است و جایگزین پزشک نیست.",reply_markup=kb())
+
+    @dp.message(Command("cancel"))
+    async def cancel(m:Message,s:FSMContext):
+        await s.clear(); await m.answer("عملیات لغو شد.",reply_markup=kb())
+
+    @dp.message(F.text=="📝 تکمیل پروفایل")
+    async def begin(m:Message,s:FSMContext):
+        await s.clear(); await s.set_state(Form.name); await m.answer("نام یا نام مستعار؟")
+
+    @dp.message(Form.name)
+    async def f1(m,s): await s.update_data(name=(m.text or "")[:80]); await s.set_state(Form.age); await m.answer("سن؟ (۱۳ تا ۹۰)")
+    @dp.message(Form.age)
+    async def f2(m,s):
+        try: n=int(m.text)
+        except: n=0
+        if not 13<=n<=90: return await m.answer("سن معتبر وارد کن.")
+        await s.update_data(age=n); await s.set_state(Form.sex); await m.answer("جنسیت (اختیاری): مرد / زن / ترجیح می‌دهم نگویم")
+    @dp.message(Form.sex)
+    async def f3(m,s): await s.update_data(sex=(m.text or "")[:50]); await s.set_state(Form.height); await m.answer("قد به سانتی‌متر؟")
+    @dp.message(Form.height)
+    async def f4(m,s):
+        try: n=float(m.text.replace(",",".")); assert 100<=n<=230
+        except: return await m.answer("قد معتبر بین ۱۰۰ تا ۲۳۰ وارد کن.")
+        await s.update_data(height=n); await s.set_state(Form.weight); await m.answer("وزن به کیلوگرم؟")
+    @dp.message(Form.weight)
+    async def f5(m,s):
+        try: n=float(m.text.replace(",",".")); assert 25<=n<=300
+        except: return await m.answer("وزن معتبر وارد کن.")
+        await s.update_data(weight=n); await s.set_state(Form.goal); await m.answer("هدف: افزایش حجم / کاهش چربی / قدرت / تناسب / آمادگی ورزشی")
+    @dp.message(Form.goal)
+    async def f6(m,s): await s.update_data(goal=(m.text or "")[:150]); await s.set_state(Form.experience); await m.answer("سابقه و سطح تمرینت؟ مبتدی / متوسط / پیشرفته + توضیح")
+    @dp.message(Form.experience)
+    async def f7(m,s): await s.update_data(experience=(m.text or "")[:250]); await s.set_state(Form.equipment); await m.answer("امکانات: باشگاه کامل / دمبل خانه / وزن بدن / سایر")
+    @dp.message(Form.equipment)
+    async def f8(m,s): await s.update_data(equipment=(m.text or "")[:150]); await s.set_state(Form.days); await m.answer("هفته‌ای چند جلسه می‌توانی تمرین کنی؟ ۱ تا ۷")
+    @dp.message(Form.days)
+    async def f9(m,s):
+        try: n=int(m.text); assert 1<=n<=7
+        except: return await m.answer("عدد ۱ تا ۷ وارد کن.")
+        await s.update_data(days=n); await s.set_state(Form.recovery); await m.answer("وضعیت خواب و ریکاوری؟ (مثلاً ۷ ساعت خواب، استرس متوسط)")
+    @dp.message(Form.recovery)
+    async def f10(m,s): await s.update_data(recovery=(m.text or "")[:250]); await s.set_state(Form.limitations); await m.answer("تمام آسیب‌ها، بیماری‌ها یا محدودیت‌های پزشکی را با کاما جدا کن. اگر نداری بنویس: خیر")
+    @dp.message(Form.limitations)
+    async def f11(m,s): await s.update_data(limitations=(m.text or "")[:700]); await s.set_state(Form.medication); await m.answer("داروی منظم مصرف می‌کنی؟ خیر / بله + نام دارو (در صورت تمایل)")
+    @dp.message(Form.medication)
+    async def f12(m,s): await s.update_data(medication=(m.text or "")[:350]); await s.set_state(Form.notes); await m.answer("توضیحات تکمیلی، حساسیت غذایی یا حرکات ممنوع؟ اگر نداری: ندارد")
+    @dp.message(Form.notes)
+    async def f13(m,s):
+        await s.update_data(notes=(m.text or "")[:700]); d=await s.get_data(); save_profile(m.from_user.id,d); await s.clear()
+        await m.answer("پروفایل ذخیره شد. اکنون می‌توانی از امکانات استفاده کنی.",reply_markup=kb())
+
+    @dp.message(F.text=="👤 پروفایل من")
+    async def show_profile(m):
+        p=profile(m.from_user.id)
+        if not p: return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        keys=[("نام","name"),("سن","age"),("قد","height"),("وزن","weight"),("هدف","goal"),("سابقه","experience"),("تجهیزات","equipment"),("جلسات","days"),("ریکاوری","recovery"),("محدودیت‌ها","limitations"),("دارو","medication"),("توضیحات","notes")]
+        await m.answer("👤 پروفایل:\n"+"\n".join(f"{a}: {p.get(b) or '—'}" for a,b in keys))
+
+    async def generate(m,kind,question):
+        p=profile(m.from_user.id)
+        if not p: return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        ok,msg=consume_plan(m.from_user.id)
+        if not ok: return await m.answer(msg+"\nبرای فعال‌سازی، با مربی تماس بگیر.")
+        await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
+        coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
+        answer=await asyncio.to_thread(ask,p,question,coach_id)
+        status="pending" if APPROVAL_MODE=="both" else "approved"
+        pid=create_program(m.from_user.id,coach_id,kind,question,answer,status)
+        if status=="pending":
+            await m.answer(f"درخواست برنامه ثبت شد و برای تأیید مربی ارسال شد. کد پیگیری: {pid}")
+            if coach_id:
+                try: await bot.send_message(coach_id,f"درخواست جدید برنامه #{pid}\nورزشکار: {m.from_user.id}\nنوع: {kind}\nبرای بررسی: /pending")
+                except: pass
+        else:
+            await m.answer(answer)
+    @dp.message(F.text=="🏋️ برنامه تمرین")
+    async def workout(m): await generate(m,"workout","برنامه تمرینی هفتگی شخصی‌سازی‌شده با جزئیات روزها، حرکت، ست، تکرار، استراحت، RIR و نکات فرم اجرا طراحی کن. محدودیت‌های پزشکی را در نظر بگیر.")
+    @dp.message(F.text=="🥗 راهنمای تغذیه")
+    async def food(m): await generate(m,"nutrition","راهنمای تغذیه عمومی و قابل اجرا برای هدف من بده؛ نمونه وعده و منابع پروتئین ارائه کن. رژیم افراطی نده.")
+
+    @dp.message(F.text=="💬 سؤال از مربی")
+    async def ask_start(m,s): await s.set_state(QuestionForm.question); await m.answer("سؤالت را در یک پیام بفرست.")
+    @dp.message(QuestionForm.question)
+    async def ask_user(m,s):
+        await s.clear(); p=profile(m.from_user.id)
+        if not p: return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
+        ans=await asyncio.to_thread(ask,p,(m.text or "")[:2000],coach_id)
+        await m.answer(ans[:3900])
+
+    @dp.message(F.text=="📈 ثبت پیشرفت")
+    async def progress_start(m,s): await s.set_state(ProgressForm.entry); await m.answer("وزن، رکوردها، تعداد تکرار، احساس تمرین یا تغییراتت را بنویس.")
+    @dp.message(ProgressForm.entry)
+    async def progress_save(m,s):
+        add_progress(m.from_user.id,(m.text or "")[:1000]); await s.clear(); await m.answer("پیشرفت ثبت شد.")
+    @dp.message(F.text=="📚 برنامه‌های قبلی")
+    async def old_programs(m):
+        with db() as c:
+            rows=c.execute("SELECT id,kind,status,created_at,content FROM programs WHERE athlete_id=? ORDER BY id DESC LIMIT 5",(m.from_user.id,)).fetchall()
+        if not rows: return await m.answer("هنوز برنامه‌ای ثبت نشده.")
+        for r in rows:
+            await m.answer(f"برنامه #{r['id']} | {r['kind']} | {r['status']}\n{r['content'][:3500]}")
+
+    # Structured workout logging
+    @dp.message(F.text=="🏃 ثبت تمرین")
+    async def workout_log_start(m,s):
+        if not profile(m.from_user.id): return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        await s.clear(); await s.set_state(WorkoutLogForm.exercise); await m.answer("نام حرکت؟")
+    @dp.message(WorkoutLogForm.exercise)
+    async def wl1(m,s): await s.update_data(exercise=(m.text or "")[:100]); await s.set_state(WorkoutLogForm.sets); await m.answer("چند ست؟")
+    @dp.message(WorkoutLogForm.sets)
+    async def wl2(m,s):
+        try: v=int(m.text); assert 1<=v<=30
+        except: return await m.answer("عدد ست باید بین ۱ تا ۳۰ باشد.")
+        await s.update_data(sets=v); await s.set_state(WorkoutLogForm.reps); await m.answer("تکرار هر ست؟ مثلاً ۱۰،۱۰،۸")
+    @dp.message(WorkoutLogForm.reps)
+    async def wl3(m,s): await s.update_data(reps=(m.text or "")[:80]); await s.set_state(WorkoutLogForm.weight); await m.answer("وزنه به کیلوگرم؟ برای وزن بدن ۰ بنویس.")
+    @dp.message(WorkoutLogForm.weight)
+    async def wl4(m,s):
+        try: v=float(m.text.replace(",",".")); assert 0<=v<=1000
+        except: return await m.answer("وزنه معتبر وارد کن.")
+        await s.update_data(weight=v); await s.set_state(WorkoutLogForm.rir); await m.answer("RIR چند بود؟ عدد ۰ تا 10 یا نامشخص")
+    @dp.message(WorkoutLogForm.rir)
+    async def wl5(m,s):
+        try: v=None if "نامشخص" in m.text else float(m.text.replace(",",".")); assert v is None or 0<=v<=10
+        except: return await m.answer("RIR باید بین ۰ تا ۱۰ یا نامشخص باشد.")
+        await s.update_data(rir=v); await s.set_state(WorkoutLogForm.notes); await m.answer("یادداشت یا میزان درد/ناراحتی؟ اگر نداری بنویس خیر.")
+    @dp.message(WorkoutLogForm.notes)
+    async def wl6(m,s):
+        d=await s.get_data(); add_workout(m.from_user.id,d["exercise"],d["sets"],d["reps"],d["weight"],d["rir"],(m.text or "")[:300]); await s.clear(); await m.answer("✅ تمرین ثبت شد.")
+
+    # Nutrition log
+    @dp.message(F.text=="🍽 ثبت غذا")
+    async def food_log_start(m,s):
+        await s.clear(); await s.set_state(NutritionForm.meal); await m.answer("نام وعده یا غذا؟")
+    @dp.message(NutritionForm.meal)
+    async def nf1(m,s): await s.update_data(meal=(m.text or "")[:100]); await s.set_state(NutritionForm.calories); await m.answer("کالری تقریبی؟")
+    async def nutrition_number(m,s,key,next_state,prompt,maximum):
+        try: v=float(m.text.replace(",",".")); assert 0<=v<=maximum
+        except: return await m.answer(f"عدد معتبر بین صفر تا {maximum} وارد کن.")
+        await s.update_data(**{key:v}); await s.set_state(next_state); await m.answer(prompt)
+    @dp.message(NutritionForm.calories)
+    async def nf2(m,s): await nutrition_number(m,s,"calories",NutritionForm.protein,"پروتئین به گرم؟",10000)
+    @dp.message(NutritionForm.protein)
+    async def nf3(m,s): await nutrition_number(m,s,"protein",NutritionForm.carbs,"کربوهیدرات به گرم؟",10000)
+    @dp.message(NutritionForm.carbs)
+    async def nf4(m,s): await nutrition_number(m,s,"carbs",NutritionForm.fat,"چربی به گرم؟",10000)
+    @dp.message(NutritionForm.fat)
+    async def nf5(m,s): await nutrition_number(m,s,"fat",NutritionForm.notes,"یادداشت اختیاری؟",10000)
+    @dp.message(NutritionForm.notes)
+    async def nf6(m,s):
+        d=await s.get_data(); add_nutrition(m.from_user.id,d["meal"],d["calories"],d["protein"],d["carbs"],d["fat"],(m.text or "")[:250]); await s.clear(); await m.answer("✅ وعده غذایی ثبت شد.")
+
+    # Body measurements
+    @dp.message(F.text=="⚖️ اندازه‌گیری بدن")
+    async def measure_start(m,s):
+        await s.clear(); await s.set_state(MeasurementForm.weight); await m.answer("وزن فعلی به کیلوگرم؟")
+    async def optional_measure(m,s,key,next_state,prompt,low,high):
+        t=(m.text or "").strip()
+        if t in ("-","ندارم","خالی"): v=None
+        else:
+            try: v=float(t.replace(",",".")); assert low<=v<=high
+            except: return await m.answer(f"عدد بین {low} تا {high} یا «ندارم» وارد کن.")
+        await s.update_data(**{key:v}); await s.set_state(next_state); await m.answer(prompt)
+    @dp.message(MeasurementForm.weight)
+    async def ms1(m,s): await optional_measure(m,s,"weight",MeasurementForm.waist,"دور کمر به سانتی‌متر؟ یا ندارم",25,250)
+    @dp.message(MeasurementForm.waist)
+    async def ms2(m,s): await optional_measure(m,s,"waist",MeasurementForm.chest,"دور سینه؟ یا ندارم",25,250)
+    @dp.message(MeasurementForm.chest)
+    async def ms3(m,s): await optional_measure(m,s,"chest",MeasurementForm.arm,"دور بازو؟ یا ندارم",10,100)
+    @dp.message(MeasurementForm.arm)
+    async def ms4(m,s): await optional_measure(m,s,"arm",MeasurementForm.thigh,"دور ران؟ یا ندارم",15,150)
+    @dp.message(MeasurementForm.thigh)
+    async def ms5(m,s):
+        d=await s.get_data(); t=(m.text or "").strip()
+        try: thigh=None if t in ("-","ندارم","خالی") else float(t.replace(",",".")); assert thigh is None or 15<=thigh<=150
+        except: return await m.answer("عدد معتبر یا «ندارم» وارد کن.")
+        add_measurement(m.from_user.id,d["weight"],d.get("waist"),d.get("chest"),d.get("arm"),thigh); await s.clear(); await m.answer("✅ اندازه‌گیری ثبت شد.")
+
+    # Daily check-in
+    @dp.message(F.text=="🛌 چک‌این روزانه")
+    async def ci_start(m,s):
+        await s.clear(); await s.set_state(CheckinForm.sleep); await m.answer("دیشب چند ساعت خوابیدی؟")
+    @dp.message(CheckinForm.sleep)
+    async def ci1(m,s):
+        try: v=float(m.text.replace(",",".")); assert 0<=v<=24
+        except: return await m.answer("عدد ساعت خواب بین صفر تا ۲۴ وارد کن.")
+        await s.update_data(sleep=v); await s.set_state(CheckinForm.energy); await m.answer("انرژی امروز از ۱ تا ۵؟")
+    @dp.message(CheckinForm.energy)
+    async def ci2(m,s):
+        try: v=int(m.text); assert 1<=v<=5
+        except: return await m.answer("عدد ۱ تا ۵ وارد کن.")
+        await s.update_data(energy=v); await s.set_state(CheckinForm.soreness); await m.answer("کوفتگی/درد عضلانی از ۱ تا ۵؟ اگر درد تیز یا غیرعادی داری توضیح بده.")
+    @dp.message(CheckinForm.soreness)
+    async def ci3(m,s):
+        try: v=int(m.text); assert 1<=v<=5
+        except: return await m.answer("عدد ۱ تا ۵ وارد کن.")
+        await s.update_data(soreness=v); await s.set_state(CheckinForm.adherence); await m.answer("پایبندی به برنامه امروز از ۱ تا ۵؟")
+    @dp.message(CheckinForm.adherence)
+    async def ci4(m,s):
+        try: v=int(m.text); assert 1<=v<=5
+        except: return await m.answer("عدد ۱ تا ۵ وارد کن.")
+        await s.update_data(adherence=v); await s.set_state(CheckinForm.notes); await m.answer("یادداشت اختیاری؛ اگر نداری بنویس خیر.")
+    @dp.message(CheckinForm.notes)
+    async def ci5(m,s):
+        d=await s.get_data(); add_checkin(m.from_user.id,d["sleep"],d["energy"],d["soreness"],d["adherence"],(m.text or "")[:250]); await s.clear()
+        warning="\nاگر درد شدید، تیز، رو به افزایش یا همراه با تورم/بی‌حسی است، تمرین را متوقف و ارزیابی تخصصی دریافت کن." if d["soreness"]>=4 else ""
+        await m.answer("✅ چک‌این ثبت شد."+warning)
+
+    @dp.message(F.text=="📊 گزارش من")
+    async def my_report(m):
+        uid=m.from_user.id
+        w=recent_rows("workout_logs",uid,7); n=recent_rows("nutrition_logs",uid,20); b=recent_rows("body_measurements",uid,2); c=recent_rows("daily_checkins",uid,7)
+        lines=["📊 گزارش فعالیت تو",f"ثبت تمرین اخیر: {len(w)}",f"وعده‌های ثبت‌شده: {len(n)}",f"چک‌این‌ها: {len(c)}"]
+        if b:
+            lines.append(f"آخرین وزن ثبت‌شده: {b[0]['weight']} کیلوگرم")
+            if len(b)>1 and b[1]['weight'] is not None: lines.append(f"تغییر نسبت به ثبت قبلی: {b[0]['weight']-b[1]['weight']:+.1f} کیلوگرم")
+        if c:
+            avg_sleep=sum(x['sleep_hours'] for x in c)/len(c); lines.append(f"میانگین خواب ثبت‌شده: {avg_sleep:.1f} ساعت")
+        if n:
+            lines.append(f"مجموع کالری وعده‌های ثبت‌شده اخیر: {sum(x['calories'] for x in n):.0f} kcal (فقط داده‌های ثبت‌شده، نه لزوماً کل روز)")
+        lines.append("\nاین گزارش بر اساس ورودی‌های ثبت‌شده است و جایگزین ارزیابی متخصص نیست.")
+        await m.answer("\n".join(lines))
+
+    @dp.message(Command("privacy"))
+    async def privacy(m):
+        await m.answer("اطلاعات پروفایل و سوابق برای ارائه خدمات ذخیره می‌شوند. برای درخواست حذف داده‌های حساب، دستور /delete_my_data را بزن. فایل‌های ویدئو در پردازش موقت حذف می‌شوند.")
+    @dp.message(Command("delete_my_data"))
+    async def delete_data(m,s):
+        await s.set_state(DeleteForm.confirm)
+        await m.answer("حذف اطلاعات قابل بازگشت نیست. برای تأیید دقیقاً بنویس: حذف اطلاعات من")
+    @dp.message(DeleteForm.confirm)
+    async def delete_confirm(m,s):
+        await s.clear()
+        if (m.text or "").strip() != "حذف اطلاعات من":
+            return await m.answer("حذف لغو شد.")
+        delete_athlete_data(m.from_user.id)
+        await m.answer("اطلاعات ورزشی ذخیره‌شده این حساب حذف شد. برای استفاده دوباره پروفایل را از نو بساز.")
+
+    @dp.message(Command("coach"))
+    async def coach_panel(m):
+        if not is_coach(m.from_user.id): return await m.answer("این بخش مخصوص مربی است.")
+        await m.answer("📚 پنل مربی\nبرای افزودن دانش و روش مربی، فایل Excel با فرمت xlsx را همین‌جا ارسال کن.\n/pending برای درخواست‌ها\n/knowledge برای تعداد ردیف‌های دانش")
+
+    @dp.message(Command("knowledge"))
+    async def knowledge_count(m):
+        if not is_coach(m.from_user.id): return
+        with db() as c: n=c.execute("SELECT COUNT(*) FROM coach_knowledge WHERE coach_id=?",(m.from_user.id,)).fetchone()[0]
+        await m.answer(f"ردیف‌های دانش واردشده: {n}")
+
+    @dp.message(F.document)
+    async def excel_upload(m):
+        if not is_coach(m.from_user.id): return
+        doc=m.document
+        if not doc.file_name.lower().endswith((".xlsx",".xlsm")): return await m.answer("فقط فایل Excel با پسوند xlsx یا xlsm ارسال کن.")
+        if doc.file_size and doc.file_size>8*1024*1024: return await m.answer("حداکثر حجم فایل ۸ مگابایت است.")
+        suffix=Path(doc.file_name).suffix
+        with tempfile.NamedTemporaryFile(delete=False,suffix=suffix) as tmp: path=Path(tmp.name)
+        try:
+            await bot.download(doc,path)
+            count=await asyncio.to_thread(import_excel,path,m.from_user.id)
+            await m.answer(f"✅ فایل وارد شد. {count} ردیف دانش از Excel ثبت شد.\nاز این پس پاسخ‌ها و برنامه‌ها می‌توانند از این محتوا استفاده کنند.")
+        except Exception as e: await m.answer(f"خطا در خواندن فایل: {type(e).__name__}: {str(e)[:300]}")
+        finally:
+            try: path.unlink(missing_ok=True)
+            except: pass
+
+    @dp.message(Command("pending"))
+    async def pending_cmd(m):
+        if not is_coach(m.from_user.id): return
+        items=pending(m.from_user.id)
+        if not items: return await m.answer("درخواست معلقی وجود ندارد.")
+        for x in items[-10:]:
+            await m.answer(f"#{x['id']} ورزشکار {x['athlete_id']} | {x['kind']}\n{x['content'][:2500]}\nبرای تأیید: /approve {x['id']}\nبرای رد: /reject {x['id']} دلیل")
+
+    @dp.message(Command("approve"))
+    async def approve_cmd(m):
+        if not is_coach(m.from_user.id): return
+        try: pid=int(m.text.split()[1])
+        except: return await m.answer("فرمت: /approve ID")
+        x=get_program(pid)
+        if not x or x["coach_id"]!=m.from_user.id: return await m.answer("درخواست پیدا نشد یا متعلق به شما نیست.")
+        review(pid,"approved")
+        try: await bot.send_message(x["athlete_id"],f"✅ برنامه #{pid} توسط مربی تأیید شد:\n{x['content'][:3800]}")
+        except: pass
+        await m.answer("برنامه تأیید شد.")
+
+    @dp.message(Command("reject"))
+    async def reject_cmd(m):
+        if not is_coach(m.from_user.id): return
+        parts=m.text.split(maxsplit=2)
+        if len(parts)<2: return await m.answer("فرمت: /reject ID توضیح")
+        try: pid=int(parts[1])
+        except: return await m.answer("شناسه نامعتبر است.")
+        x=get_program(pid)
+        if not x or x["coach_id"]!=m.from_user.id: return await m.answer("درخواست پیدا نشد.")
+        note=parts[2] if len(parts)>2 else "نیازمند اصلاح"
+        review(pid,"rejected",note)
+        try: await bot.send_message(x["athlete_id"],f"برنامه #{pid} فعلاً تأیید نشد.\nتوضیح مربی: {note}")
+        except: pass
+        await m.answer("درخواست رد شد.")
+
+    @dp.message(Command("grant"))
+    async def grant_cmd(m):
+        if m.from_user.id not in ADMIN_IDS: return
+        parts=m.text.split()
+        if len(parts)<2: return await m.answer("فرمت: /grant TELEGRAM_ID [days]")
+        try: uid=int(parts[1]); days=int(parts[2]) if len(parts)>2 else SUBSCRIPTION_DAYS
+        except: return await m.answer("شناسه یا روز نامعتبر است.")
+        grant(uid,days,SUBSCRIPTION_PLAN_LIMIT)
+        await m.answer(f"دسترسی {days} روزه برای {uid} فعال شد.")
+
+    @dp.message(Command("stats"))
+    async def stats_cmd(m):
+        if m.from_user.id not in ADMIN_IDS: return
+        a,p,k=stats(); await m.answer(f"آمار\nورزشکاران: {a}\nبرنامه‌ها: {p}\nردیف دانش مربی: {k}")
+
+    @dp.message(F.text=="🎥 تحلیل فرم حرکت")
+    async def video_help(m):
+        await m.answer(
+            "🎥 تحلیل ویدئویی FitCoach AI\n"
+            "یک ویدئوی کوتاه ۱ تا ۲۰ ثانیه‌ای از اجرای یک حرکت بفرست.\n"
+            "برای نتیجه بهتر: تمام بدن و مفاصل موردنظر داخل کادر باشند، دوربین ثابت باشد و نور کافی وجود داشته باشد.\n"
+            "در این نسخه، نقاط کلیدی بدن روی ویدئو نمایش داده می‌شوند؛ این خروجی تشخیص پزشکی یا تأیید قطعی صحیح‌بودن حرکت نیست."
+        )
+
+    @dp.message(F.video)
+    async def analyze_uploaded_video(m:Message):
+        if not m.video:
+            return
+        video = m.video
+        if video.duration and video.duration > 20:
+            return await m.answer("مدت ویدئو باید حداکثر ۲۰ ثانیه باشد.")
+        if video.file_size and video.file_size > 18 * 1024 * 1024:
+            return await m.answer("حجم ویدئو باید کمتر از ۱۸ مگابایت باشد.")
+        if not profile(m.from_user.id):
+            return await m.answer("ابتدا پروفایل ورزشکاری خود را تکمیل کن.")
+        await m.answer("ویدئو دریافت شد. در حال استخراج نقاط کلیدی بدن و ساخت نسخه تصویری... ⏳")
+        with tempfile.TemporaryDirectory() as td:
+            inp = Path(td) / "input.mp4"
+            out = Path(td) / "fitcoach_pose_overlay.mp4"
+            try:
+                file = await bot.get_file(video.file_id)
+                await bot.download_file(file.file_path, destination=inp)
+                metrics = await asyncio.to_thread(analyze_video, str(inp), str(out))
+                caption = (
+                    "✅ نسخه تصویری تحلیل آماده شد.\n"
+                    f"مدت: {metrics['duration']} ثانیه\n"
+                    f"فریم‌های پردازش‌شده: {metrics['frames']}\n"
+                    f"نسبت فریم‌های دارای تشخیص بدن: {metrics['pose_detection_ratio']:.0%}\n\n"
+                    "خطوط و نقاط روی ویدئو فقط تخمین وضعیت بدن هستند؛ "
+                    "این نسخه هنوز خطای تکنیکی حرکت یا ایمنی پزشکی را تأیید نمی‌کند."
+                )
+                await m.answer_video(FSInputFile(out), caption=caption)
+            except Exception as exc:
+                msg = str(exc)
+                if "نصب نیستند" in msg:
+                    await m.answer("قابلیت تحلیل ویدئو روی سرور فعال نشده است. بسته‌های requirements-video.txt باید نصب شوند.")
+                else:
+                    await m.answer("پردازش ویدئو انجام نشد. ویدئوی کوتاه‌تر، واضح‌تر و با فرمت MP4 بفرست.\nجزئیات: " + msg[:500])
+
+    @dp.message(F.photo)
+    async def photo(m):
+        await m.answer("عکس دریافت شد. در نسخه فعلی تحلیل فرم از روی ویدئو انجام می‌شود؛ عکس ثابت برای ارزیابی حرکت کافی نیست. برای ارزیابی آسیب یا تشخیص پزشکی به متخصص مراجعه کن.")
+
+    @dp.message(F.text=="ℹ️ راهنما")
+    async def help_msg(m):
+        await m.answer("راهنما: پروفایل را تکمیل کن؛ سپس برنامه تمرین، تغذیه، ثبت تمرین، ثبت غذا، اندازه‌گیری بدن، چک‌این و گزارش را استفاده کن.\nمربی: /coach و ارسال فایل Excel\nلغو: /cancel\nبرنامه‌های قبلی پس از پایان اشتراک نیز قابل مشاهده‌اند.")
+
+    @dp.message()
+    async def fallback(m): await m.answer("برای شروع /start را بزن یا از منوی پایین استفاده کن.")
+
+    try: await dp.start_polling(bot)
+    finally: await bot.session.close()
