@@ -7,9 +7,13 @@ fd, name = tempfile.mkstemp(suffix='.db')
 os.close(fd)
 os.environ['DATABASE_PATH'] = name
 os.environ['FREE_MODE'] = 'true'
-from fitcoach.db import (init, save_profile, profile, add_workout, add_nutrition,
-                         add_measurement, add_checkin, recent_rows,
-                         consume_plan, delete_athlete_data, start_conversation,\n                         end_conversation, is_conversation_active,\n                         add_conversation_message, get_conversation_history)
+from fitcoach.db import (
+    init, save_profile, profile, add_workout, add_nutrition,
+    add_measurement, add_checkin, recent_rows, consume_plan,
+    delete_athlete_data, start_conversation, end_conversation,
+    is_conversation_active, add_conversation_message,
+    get_conversation_history,
+)
 
 init()
 uid = 987654321
