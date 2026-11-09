@@ -13,6 +13,7 @@ def db():
 
 def init():
     with db() as c:
+        init_chat_storage()
         c.executescript("""
         CREATE TABLE IF NOT EXISTS athletes(
           telegram_id INTEGER PRIMARY KEY, name TEXT, age INTEGER, sex TEXT,
@@ -184,3 +185,90 @@ def delete_athlete_data(uid):
     with db() as c:
         for table in ("athletes","progress","access","programs","conversations","workout_logs","nutrition_logs","body_measurements","daily_checkins"):
             c.execute(f"DELETE FROM {table} WHERE athlete_id=?" if table!="athletes" else "DELETE FROM athletes WHERE telegram_id=?",(uid,))
+
+
+def init_chat_storage():
+    with db() as c:
+        columns = {
+            row["name"]
+            for row in c.execute("PRAGMA table_info(conversations)").fetchall()
+        }
+
+        if "session_id" not in columns:
+            c.execute("ALTER TABLE conversations ADD COLUMN session_id INTEGER")
+
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS coach_chat_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            athlete_id INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            active INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions
+        ON coach_chat_sessions(athlete_id, active);
+
+        CREATE INDEX IF NOT EXISTS idx_conversation_session
+        ON conversations(session_id, id);
+        """)
+
+
+def start_chat_session(uid):
+    with db() as c:
+        c.execute(
+            "UPDATE coach_chat_sessions SET active=0, ended_at=? "
+            "WHERE athlete_id=? AND active=1",
+            (now(), uid)
+        )
+        cur = c.execute(
+            "INSERT INTO coach_chat_sessions(athlete_id,started_at,active) "
+            "VALUES(?,?,1)",
+            (uid, now())
+        )
+        return cur.lastrowid
+
+
+def active_chat_session(uid):
+    with db() as c:
+        r = c.execute(
+            "SELECT id FROM coach_chat_sessions "
+            "WHERE athlete_id=? AND active=1 ORDER BY id DESC LIMIT 1",
+            (uid,)
+        ).fetchone()
+        return r["id"] if r else None
+
+
+def add_chat_message(uid, session_id, role, content):
+    if role not in ("user", "assistant"):
+        raise ValueError("Invalid chat role")
+
+    with db() as c:
+        c.execute(
+            "INSERT INTO conversations(athlete_id,session_id,role,content,created_at) "
+            "VALUES(?,?,?,?,?)",
+            (uid, session_id, role, content, now())
+        )
+
+
+def get_chat_history(session_id, limit=12):
+    with db() as c:
+        rows = c.execute(
+            "SELECT role,content FROM conversations "
+            "WHERE session_id=? ORDER BY id DESC LIMIT ?",
+            (session_id, limit)
+        ).fetchall()
+
+    return [
+        {"role": r["role"], "content": r["content"]}
+        for r in reversed(rows)
+    ]
+
+
+def end_chat_session(uid):
+    with db() as c:
+        c.execute(
+            "UPDATE coach_chat_sessions SET active=0,ended_at=? "
+            "WHERE athlete_id=? AND active=1",
+            (now(), uid)
+        )
