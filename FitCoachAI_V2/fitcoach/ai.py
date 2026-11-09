@@ -18,7 +18,7 @@ SYSTEM = """
 """
 
 
-def ask(profile, question, coach_id):
+def ask(profile, question, coach_id, history=None):
     if not GROQ_API_KEY:
         goal = str(profile.get("goal", "تناسب اندام"))
         days = int(profile.get("days") or 3)
