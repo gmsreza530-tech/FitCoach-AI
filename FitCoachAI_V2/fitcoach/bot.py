@@ -24,11 +24,42 @@ class MeasurementForm(StatesGroup): weight=State(); waist=State(); chest=State()
 class CheckinForm(StatesGroup): sleep=State(); energy=State(); soreness=State(); adherence=State(); notes=State()
 class DeleteForm(StatesGroup): confirm=State()
 
+def split_telegram_text(text, limit=3900):
+    """Split long plain-text replies without dropping content."""
+    text = str(text or "").strip()
+    if not text:
+        return []
+    chunks, current = [], ""
+    for paragraph in text.split("\n"):
+        while len(paragraph) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(paragraph[:limit])
+            paragraph = paragraph[limit:]
+        candidate = paragraph if not current else current + "\n" + paragraph
+        if len(candidate) > limit:
+            if current:
+                chunks.append(current)
+            current = paragraph
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def send_long_text(message: Message, text: str, limit=3900):
+    for chunk in split_telegram_text(text, limit=limit):
+        await message.answer(chunk)
+
+
 def kb():
     return ReplyKeyboardMarkup(keyboard=[
       [KeyboardButton(text="📝 تکمیل پروفایل"),KeyboardButton(text="👤 پروفایل من")],
       [KeyboardButton(text="🏋️ برنامه تمرین"),KeyboardButton(text="🥗 راهنمای تغذیه")],
       [KeyboardButton(text="💬 سؤال از مربی"),KeyboardButton(text="📈 ثبت پیشرفت")],
+      [KeyboardButton(text="🔚 پایان گفتگو")],
       [KeyboardButton(text="🎥 تحلیل فرم حرکت"),KeyboardButton(text="📚 برنامه‌های قبلی")],
       [KeyboardButton(text="🏃 ثبت تمرین"),KeyboardButton(text="🍽 ثبت غذا")],
       [KeyboardButton(text="⚖️ اندازه‌گیری بدن"),KeyboardButton(text="🛌 چک‌این روزانه")],
@@ -124,21 +155,58 @@ async def main():
                 try: await bot.send_message(coach_id,f"درخواست جدید برنامه #{pid}\nورزشکار: {m.from_user.id}\nنوع: {kind}\nبرای بررسی: /pending")
                 except: pass
         else:
-            await m.answer(answer)
+            await send_long_text(m, answer)
     @dp.message(F.text=="🏋️ برنامه تمرین")
     async def workout(m): await generate(m,"workout","برنامه تمرینی هفتگی شخصی‌سازی‌شده با جزئیات روزها، حرکت، ست، تکرار، استراحت، RIR و نکات فرم اجرا طراحی کن. محدودیت‌های پزشکی را در نظر بگیر.")
     @dp.message(F.text=="🥗 راهنمای تغذیه")
     async def food(m): await generate(m,"nutrition","راهنمای تغذیه عمومی و قابل اجرا برای هدف من بده؛ نمونه وعده و منابع پروتئین ارائه کن. رژیم افراطی نده.")
 
+    async def process_coach_message(m: Message):
+        uid = m.from_user.id
+        p = profile(uid)
+        if not p:
+            end_conversation(uid)
+            return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        question = (m.text or "").strip()
+        if not question:
+            return await m.answer("لطفاً پیام متنی بفرست.")
+        question = question[:12000]
+        coach_id = next(iter(COACH_IDS), next(iter(ADMIN_IDS), 0))
+        history = get_conversation_history(uid, limit=12)
+        add_conversation_message(uid, "user", question)
+        await m.answer("در حال بررسی سؤالت... ⏳")
+        answer = await asyncio.to_thread(ask, p, question, coach_id, history=history)
+        add_conversation_message(uid, "assistant", answer)
+        await send_long_text(m, answer)
+
     @dp.message(F.text=="💬 سؤال از مربی")
-    async def ask_start(m: Message, state: FSMContext): await state.set_state(QuestionForm.question); await m.answer("سؤالت را در یک پیام بفرست.")
-    @dp.message(QuestionForm.question)
-    async def ask_user(m: Message, state: FSMContext):
-        await state.clear(); p=profile(m.from_user.id)
-        if not p: return await m.answer("ابتدا پروفایل را تکمیل کن.")
-        coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
-        ans=await asyncio.to_thread(ask,p,(m.text or "")[:2000],coach_id)
-        await m.answer(ans[:3900])
+    async def ask_start(m: Message, state: FSMContext):
+        if not profile(m.from_user.id):
+            return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        start_conversation(m.from_user.id)
+        await state.set_state(QuestionForm.question)
+        if get_conversation_history(m.from_user.id, limit=12):
+            await m.answer("💬 گفت‌وگو فعال شد؛ تاریخچه قبلی هم در دسترس است. برای پایان /end_chat را بزن.")
+        else:
+            await m.answer("💬 گفت‌وگو فعال شد. پیام‌هایت را یکی‌یکی بفرست. برای پایان /end_chat یا دکمه «🔚 پایان گفتگو» را بزن.")
+
+    @dp.message(Command("end_chat"))
+    async def end_chat_command(m: Message, state: FSMContext):
+        end_conversation(m.from_user.id)
+        await state.clear()
+        await m.answer("گفت‌وگو پایان یافت؛ تاریخچه محفوظ است.", reply_markup=kb())
+
+    @dp.message(F.text=="🔚 پایان گفتگو")
+    async def end_chat_button(m: Message, state: FSMContext):
+        end_conversation(m.from_user.id)
+        await state.clear()
+        await m.answer("گفت‌وگو پایان یافت؛ تاریخچه محفوظ است.", reply_markup=kb())
+
+    @dp.message(QuestionForm.question, F.text)
+    async def ask_user(m: Message):
+        if not is_conversation_active(m.from_user.id):
+            return await m.answer("گفت‌وگوی فعالی نداری. برای شروع «💬 سؤال از مربی» را بزن.")
+        await process_coach_message(m)
 
     @dp.message(F.text=="📈 ثبت پیشرفت")
     async def progress_start(m: Message, state: FSMContext): await state.set_state(ProgressForm.entry); await m.answer("وزن، رکوردها، تعداد تکرار، احساس تمرین یا تغییراتت را بنویس.")
@@ -418,6 +486,14 @@ async def main():
     @dp.message(F.text=="ℹ️ راهنما")
     async def help_msg(m):
         await m.answer("راهنما: پروفایل را تکمیل کن؛ سپس برنامه تمرین، تغذیه، ثبت تمرین، ثبت غذا، اندازه‌گیری بدن، چک‌این و گزارش را استفاده کن.\nمربی: /coach و ارسال فایل Excel\nلغو: /cancel\nبرنامه‌های قبلی پس از پایان اشتراک نیز قابل مشاهده‌اند.")
+
+    @dp.message(F.text)
+    async def active_chat_fallback(m: Message):
+        # Recover an active chat after restart when in-memory FSM state is lost.
+        if is_conversation_active(m.from_user.id):
+            await process_coach_message(m)
+            return
+        await m.answer("برای شروع /start را بزن یا از منوی پایین استفاده کن.")
 
     @dp.message()
     async def fallback(m): await m.answer("برای شروع /start را بزن یا از منوی پایین استفاده کن.")
