@@ -155,27 +155,54 @@ def ask(
 
     try:
         client = Groq(api_key=GROQ_API_KEY)
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            temperature=0.35,
-            max_tokens=6000,
-        )
+        answer_parts: List[str] = []
+        max_continuations = 2
 
-        if not response.choices:
-            return "مدل پاسخی برنگرداند. لطفاً دوباره تلاش کن."
+        for attempt in range(max_continuations + 1):
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                temperature=0.35,
+                max_tokens=6000,
+            )
 
-        choice = response.choices[0]
-        answer = (choice.message.content or "").strip()
+            if not response.choices:
+                if answer_parts:
+                    break
+                return "مدل پاسخی برنگرداند. لطفاً دوباره تلاش کن."
 
+            choice = response.choices[0]
+            part = (choice.message.content or "").strip()
+            if part:
+                answer_parts.append(part)
+
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason != "length":
+                break
+
+            if attempt >= max_continuations:
+                break
+
+            # Ask for a continuation in the same completion context. The
+            # assistant prefix prevents the model from restarting the answer.
+            messages.append({"role": "assistant", "content": part})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "پاسخ قبلی به دلیل محدودیت طول قطع شد. دقیقاً از همان نقطه "
+                    "ادامه بده؛ مطالب قبلی را تکرار نکن و پاسخ را جمع‌بندی یا "
+                    "بازنویسی نکن مگر اینکه واقعاً به پایان رسیده باشی."
+                ),
+            })
+
+        answer = "\n\n".join(part for part in answer_parts if part).strip()
         if not answer:
             return "پاسخ خالی از سرویس هوش مصنوعی دریافت شد. لطفاً درخواستت را دوباره بفرست."
 
-        finish_reason = getattr(choice, "finish_reason", None)
-        if finish_reason == "length":
+        if len(answer_parts) >= max_continuations + 1 and getattr(choice, "finish_reason", None) == "length":
             answer += (
-                "\n\n⚠️ پاسخ به سقف طول خروجی مدل رسیده و ممکن است ادامه داشته باشد. "
-                "بنویس «ادامه بده» تا ادامه پاسخ را دریافت کنی."
+                "\n\n⚠️ پاسخ بسیار طولانی بود و به سقف ادامه خودکار رسید. "
+                "برای دریافت بخش باقی‌مانده، سؤال تکمیلی بفرست."
             )
 
         return answer
