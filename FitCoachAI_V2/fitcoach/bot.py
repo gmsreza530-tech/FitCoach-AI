@@ -391,7 +391,7 @@ async def main():
         items=pending(m.from_user.id)
         if not items: return await m.answer("درخواست معلقی وجود ندارد.")
         for x in items[-10:]:
-            await m.answer(f"#{x['id']} ورزشکار {x['athlete_id']} | {x['kind']}\n{x['content'][:2500]}\nبرای تأیید: /approve {x['id']}\nبرای رد: /reject {x['id']} دلیل")
+            await send_long_text(m, f"#{x['id']} ورزشکار {x['athlete_id']} | {x['kind']}\\n{x['content']}\\nبرای تأیید: /approve {x['id']}\\nبرای رد: /reject {x['id']} دلیل")
 
     @dp.message(Command("approve"))
     async def approve_cmd(m):
@@ -401,8 +401,11 @@ async def main():
         x=get_program(pid)
         if not x or x["coach_id"]!=m.from_user.id: return await m.answer("درخواست پیدا نشد یا متعلق به شما نیست.")
         review(pid,"approved")
-        try: await bot.send_message(x["athlete_id"],f"✅ برنامه #{pid} توسط مربی تأیید شد:\n{x['content'][:3800]}")
-        except: pass
+        try:
+            for chunk in split_telegram_text(f"✅ برنامه #{pid} توسط مربی تأیید شد:\\n{x['content']}"):
+                await bot.send_message(x["athlete_id"], chunk)
+        except Exception:
+            pass
         await m.answer("برنامه تأیید شد.")
 
     @dp.message(Command("reject"))
