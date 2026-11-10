@@ -26,7 +26,7 @@ class PostgreSQLBackendTests(unittest.TestCase):
                 "conversation_sessions", "progress", "access", "athletes",
                 "accounts",
             ):
-                key = "telegram_id" if table == "accounts" else "athlete_id"
+                key = "telegram_id" if table in {"accounts", "athletes"} else "athlete_id"
                 if table == "wallet_transactions":
                     connection.execute("DELETE FROM wallet_transactions WHERE telegram_id=?", (cls.uid,))
                 elif table == "accounts":
