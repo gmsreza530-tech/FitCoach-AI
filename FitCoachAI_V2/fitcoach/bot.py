@@ -464,7 +464,7 @@ async def main():
             username = f"@{row['username']}" if row["username"] else "بدون نام کاربری"
             goal = f" | هدف: {row['goal']}" if row["goal"] else ""
             lines.append(f"• {name} | {username} | ID: {row['telegram_id']}{goal}")
-        await send_long_text(m, "\\n".join(lines))
+        await send_long_text(m, "\n".join(lines))
 
     @dp.message(F.text == "📥 درخواست‌های بررسی")
     async def coach_pending_button(m: Message):
@@ -474,7 +474,7 @@ async def main():
         if not items:
             return await m.answer("درخواست معلقی وجود ندارد.")
         for item in items[-10:]:
-            await send_long_text(m, f"درخواست #{item['id']}\\nورزشکار: {item['athlete_id']} | نوع: {item['kind']}\\n{item['content']}\\nتأیید: /approve {item['id']}\\nرد: /reject {item['id']} دلیل")
+            await send_long_text(m, f"درخواست #{item['id']}\nورزشکار: {item['athlete_id']} | نوع: {item['kind']}\n{item['content']}\nتأیید: /approve {item['id']}\nرد: /reject {item['id']} دلیل")
 
     @dp.message(F.text == "📚 دانش اختصاصی")
     async def coach_knowledge_button(m: Message):
@@ -482,7 +482,7 @@ async def main():
             return await m.answer("⛔ دسترسی غیرمجاز است.")
         with db() as c:
             count = c.execute("SELECT COUNT(*) FROM coach_knowledge WHERE coach_id=?", (m.from_user.id,)).fetchone()[0]
-        await m.answer(f"📚 دانش اختصاصی شما\\nتعداد ردیف‌های ثبت‌شده: {count}")
+        await m.answer(f"📚 دانش اختصاصی شما\nتعداد ردیف‌های ثبت‌شده: {count}")
 
     @dp.message(F.text == "📤 راهنمای بارگذاری دانش")
     async def coach_upload_help(m: Message):
