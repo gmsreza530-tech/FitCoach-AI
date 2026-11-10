@@ -20,7 +20,7 @@
 
 ### مدیریت و دسترسی
 - هویت حساب بر اساس Telegram ID؛ هر ورزشکار فقط داده‌های خودش را می‌بیند.
-- SQLite برای شروع؛ بدون نیاز به DATABASE_URL.
+- PostgreSQL در Production وقتی `DATABASE_URL` توسط EthioDeploy تزریق شود؛ SQLite فقط برای توسعه محلی و زمانی که `DATABASE_URL` تنظیم نشده باشد.
 - محدودیت اشتراک: ۳۰ روز و حداکثر ۵ برنامه در دوره، قابل تنظیم از ENV.
 - پشتیبانی از خرید تکی و اشتراک در مدل داده؛ پرداخت آنلاین زرین‌پال در این نسخه به‌صورت آماده‌اتصال/غیرفعال است و تا دریافت Merchant ID و URL عمومی HTTPS فعال نمی‌شود. مدیر می‌تواند دسترسی را دستی فعال کند.
 - برنامه‌های قبلی پس از انقضای اشتراک قابل مشاهده‌اند؛ ساخت برنامه جدید نیازمند دسترسی فعال است.
@@ -37,7 +37,7 @@
 ## اجرا
 1. Python 3.11 نصب کن.
 2. `pip install -r requirements.txt`
-3. `.env.example` را به `.env` کپی کن و `BOT_TOKEN` و `GROQ_API_KEY` را وارد کن.
+3. `.env.example` را به `.env` کپی کن و `BOT_TOKEN` و `GROQ_API_KEY` را وارد کن. برای اجرای محلی بدون `DATABASE_URL`، SQLite به‌صورت خودکار استفاده می‌شود.
 4. شناسه عددی تلگرام مربی را در `COACH_IDS` و مدیر را در `ADMIN_IDS` بگذار.
 5. `python main.py`
 
@@ -46,8 +46,9 @@
 - Root Directory خالی باشد اگر `main.py` و `requirements.txt` در ریشه‌اند.
 - نوع سرویس: Background Worker.
 - Start Command: `python main.py`
-- Environment Variables: `BOT_TOKEN`, `GROQ_API_KEY`, `GROQ_MODEL`, `COACH_IDS`, `ADMIN_IDS`, `APPROVAL_MODE`.
-- SQLite به دیسک پایدار نیاز دارد؛ اگر هاست فایل‌ها را در هر Deploy پاک می‌کند، Persistent Disk فعال کن. برای چند نمونه همزمان یا محصول تجاری، PostgreSQL لازم است.
+- Environment Variables: `BOT_TOKEN`, `GROQ_API_KEY`, `GROQ_MODEL`, `COACH_IDS`, `ADMIN_IDS`, `APPROVAL_MODE`. افزونه PostgreSQL در EthioDeploy متغیر `DATABASE_URL` را خودکار به برنامه تزریق می‌کند.
+- وقتی `DATABASE_URL` موجود باشد، ربات از PostgreSQL 16 استفاده می‌کند و `init()` ساختار جداول را به‌صورت idempotent ایجاد می‌کند. هیچ رمز دیتابیسی را دستی در GitHub قرار نده.
+- وقتی `DATABASE_URL` وجود نداشته باشد، SQLite محلی در `DATABASE_PATH` استفاده می‌شود.
 
 ## فرمان‌ها
 - `/start` شروع
@@ -89,3 +90,11 @@
 
 ### امکاناتی که هنوز رایگان/آماده و کامل نیستند
 تحلیل تکنیک ورزشی معتبر (فراتر از نمایش نقاط بدن)، تشخیص پزشکی، اتصال ساعت هوشمند، پرداخت آنلاین، PostgreSQL مدیریت‌شده و مقیاس میلیون‌کاربره هنوز پیاده‌سازی نشده‌اند.
+
+
+## PostgreSQL production backend
+- EthioDeploy PostgreSQL add-on provides `DATABASE_URL`; keep external database access disabled for an app hosted on EthioDeploy.
+- Install dependencies from `requirements.txt`, including `psycopg[binary]`.
+- The application selects PostgreSQL automatically when `DATABASE_URL` is non-empty; otherwise it uses SQLite for local development.
+- Schema initialization is additive/idempotent and does not copy or delete SQLite data. If the bot has existing SQLite data that must be retained, export/import it deliberately before switching backends.
+- The current migration PR adds SQLite regression tests. A live PostgreSQL connection test still requires the hosted add-on and is not claimed as completed.
