@@ -158,13 +158,22 @@ def ask(
                 "خروجی فقط یک شیء JSON معتبر و بدون Markdown باشد. "
                 "هیچ متن قبل یا بعد JSON ننویس. ساختار دقیق: "
                 '{"title":"عنوان","goal":"هدف","warmup":"گرم‌کردن",'
-                '"weekly_schedule":[{"day":"روز اول","focus":"تمرکز",'
-                '"exercises":[{"name":"نام حرکت","sets":"۳","reps":"۸ تا ۱۲",'
-                '"rest":"۹۰ ثانیه","rir":"۲","note":"نکته اجرا"}],"note":"نکته روز"}],'
+                '"weekly_schedule":[{"day":"روز اول","focus":"Push یا Pull یا Legs یا Full Body",'
+                '"exercises":[{"name":"نام حرکت","movement_pattern":"horizontal_push",'
+                '"muscle_groups":["chest"],"skill_level":"beginner",'
+                '"sets":3,"reps":"۸ تا ۱۲","rest":"۹۰ ثانیه",'
+                '"rir":2,"note":"نکته اجرا"}],"note":"نکته روز"}],'
                 '"cooldown":"سردکردن","general_notes":["نکته"],'
                 '"medical_cautions":["هشدار"]}. '
-                "تعداد روزها با جلسات قابل تمرین ورزشکار هماهنگ باشد. "
-                "برای هر حرکت نام، ست، تکرار و استراحت الزامی است. "
+                "برای هر حرکت movement_pattern را فقط از این مقادیر انتخاب کن: "
+                "horizontal_push, vertical_push, horizontal_pull, vertical_pull, squat, hinge, lunge, isolation, core, carry, power. "
+                "muscle_groups را فقط از این فهرست انتخاب کن: chest, back, shoulders, triceps, biceps, quadriceps, hamstrings, glutes, calves, core. "
+                "skill_level برای هر حرکت یکی از beginner, intermediate, advanced باشد. "
+                "تعداد روزهای برنامه باید دقیقاً با جلسات تمرین ثبت‌شده ورزشکار برابر باشد. "
+                "در روز Push حرکت کششی پشت یا بارفیکس قرار نده؛ در روز Pull حرکت فشاری سینه یا سرشانه قرار نده. "
+                "حرکت تکراری در یک روز نگذار و برای مبتدیان حرکت پیشرفته مانند بارفیکس وزنه‌دار، ماسل‌آپ یا اسنچ انتخاب نکن. "
+                "ست، تکرار، استراحت و RIR باید عددی و واقع‌بینانه باشند؛ RIR را بین صفر تا پنج نگه دار. "
+                "برای هر حرکت نام، الگوی حرکتی، عضلات هدف، سطح مهارت، ست، تکرار و استراحت الزامی است. "
                 "اطلاعات ناموجود را جعل نکن؛ مقدار نامشخص را توضیح بده. "
                 "محدودیت‌های پزشکی را رعایت کن و در صورت ابهام، برنامه پرخطر نساز."
             ),

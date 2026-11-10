@@ -9,7 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from fitcoach.config import BOT_TOKEN,COACH_IDS,ADMIN_IDS,APPROVAL_MODE,UPLOAD_DIR,SUBSCRIPTION_DAYS,SUBSCRIPTION_PLAN_LIMIT,FREE_MODE
 from fitcoach.db import *
 from fitcoach.ai import ask
-from fitcoach.program_formatter import format_workout_plan, WorkoutFormatError
+from fitcoach.program_formatter import format_workout_plan, validate_workout_plan, WorkoutFormatError
 from fitcoach.excel_import import import_excel
 from fitcoach.video_analysis import analyze_video
 
@@ -150,6 +150,7 @@ async def main():
         if kind == "workout":
             raw_answer = await asyncio.to_thread(ask, p, question, coach_id, output_format="workout_json")
             try:
+                quality_warnings = validate_workout_plan(raw_answer, p)
                 answer = format_workout_plan(raw_answer, p)
             except WorkoutFormatError as exc:
                 logger_msg = f"Workout output validation failed: {exc}"
@@ -160,7 +161,8 @@ async def main():
                 )
         else:
             answer=await asyncio.to_thread(ask,p,question,coach_id)
-        status="pending" if APPROVAL_MODE=="both" else "approved"
+        # Any quality warning or declared health constraint requires human review.
+        status="pending" if (APPROVAL_MODE=="both" or (kind == "workout" and quality_warnings)) else "approved"
         pid=create_program(m.from_user.id,coach_id,kind,question,answer,status)
         if status=="pending":
             await m.answer(f"درخواست برنامه ثبت شد و برای تأیید مربی ارسال شد. کد پیگیری: {pid}")
