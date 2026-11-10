@@ -446,10 +446,25 @@ async def main():
         await m.answer("حالت ورزشکار برای حساب شخصی مربی فعال شد.", reply_markup=kb(show_coach_entry=True))
 
     @dp.message(F.text == "👥 ورزشکاران من")
-    async def coach_athletes_placeholder(m: Message):
+    async def coach_athletes(m: Message):
         if not is_coach(m.from_user.id):
             return await m.answer("⛔ دسترسی غیرمجاز است.")
-        await m.answer("مدیریت پرونده و فهرست ورزشکاران در گام بعدی تکمیل می‌شود.", reply_markup=coach_kb())
+        with db() as c:
+            rows = c.execute(
+                "SELECT a.telegram_id, a.username, a.first_name, a.last_name, "
+                "p.name, p.goal, p.updated_at "
+                "FROM accounts a LEFT JOIN athletes p ON p.telegram_id=a.telegram_id "
+                "WHERE a.role='athlete' ORDER BY a.updated_at DESC LIMIT 30"
+            ).fetchall()
+        if not rows:
+            return await m.answer("هنوز ورزشکاری در این ربات ثبت‌نام نکرده است.", reply_markup=coach_kb())
+        lines = ["👥 فهرست ورزشکاران (حداکثر ۳۰ نفر):"]
+        for row in rows:
+            name = row["name"] or "پروفایل تکمیل نشده"
+            username = f"@{row['username']}" if row["username"] else "بدون نام کاربری"
+            goal = f" | هدف: {row['goal']}" if row["goal"] else ""
+            lines.append(f"• {name} | {username} | ID: {row['telegram_id']}{goal}")
+        await send_long_text(m, "\\n".join(lines))
 
     @dp.message(F.text == "📥 درخواست‌های بررسی")
     async def coach_pending_button(m: Message):
