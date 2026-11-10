@@ -85,6 +85,7 @@ def ask(
     question: str,
     coach_id: int,
     history: Optional[Iterable[Dict[str, Any]]] = None,
+    output_format: Optional[str] = None,
 ) -> str:
     """
     Generate an answer.
@@ -150,6 +151,24 @@ def ask(
             ),
         },
     ]
+    if output_format == "workout_json":
+        messages.append({
+            "role": "system",
+            "content": (
+                "خروجی فقط یک شیء JSON معتبر و بدون Markdown باشد. "
+                "هیچ متن قبل یا بعد JSON ننویس. ساختار دقیق: "
+                '{"title":"عنوان","goal":"هدف","warmup":"گرم‌کردن",'
+                '"weekly_schedule":[{"day":"روز اول","focus":"تمرکز",'
+                '"exercises":[{"name":"نام حرکت","sets":"۳","reps":"۸ تا ۱۲",'
+                '"rest":"۹۰ ثانیه","rir":"۲","note":"نکته اجرا"}],"note":"نکته روز"}],'
+                '"cooldown":"سردکردن","general_notes":["نکته"],'
+                '"medical_cautions":["هشدار"]}. '
+                "تعداد روزها با جلسات قابل تمرین ورزشکار هماهنگ باشد. "
+                "برای هر حرکت نام، ست، تکرار و استراحت الزامی است. "
+                "اطلاعات ناموجود را جعل نکن؛ مقدار نامشخص را توضیح بده. "
+                "محدودیت‌های پزشکی را رعایت کن و در صورت ابهام، برنامه پرخطر نساز."
+            ),
+        })
     messages.extend(_normalize_history(history))
     messages.append({"role": "user", "content": question[:12000]})
 
@@ -164,6 +183,7 @@ def ask(
                 messages=messages,
                 temperature=0.35,
                 max_tokens=6000,
+                **({"response_format": {"type": "json_object"}} if output_format == "workout_json" else {}),
             )
 
             if not response.choices:
