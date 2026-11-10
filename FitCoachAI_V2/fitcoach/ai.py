@@ -184,7 +184,9 @@ def ask(
     try:
         client = Groq(api_key=GROQ_API_KEY)
         answer_parts: List[str] = []
-        max_continuations = 2
+        # JSON must be emitted as one complete document. Concatenating a
+        # truncated JSON prefix with a second completion corrupts the payload.
+        max_continuations = 0 if output_format == "workout_json" else 2
 
         for attempt in range(max_continuations + 1):
             response = client.chat.completions.create(
@@ -228,7 +230,11 @@ def ask(
         if not answer:
             return "پاسخ خالی از سرویس هوش مصنوعی دریافت شد. لطفاً درخواستت را دوباره بفرست."
 
-        if len(answer_parts) >= max_continuations + 1 and getattr(choice, "finish_reason", None) == "length":
+        if (
+            output_format != "workout_json"
+            and len(answer_parts) >= max_continuations + 1
+            and getattr(choice, "finish_reason", None) == "length"
+        ):
             answer += (
                 "\n\n⚠️ پاسخ بسیار طولانی بود و به سقف ادامه خودکار رسید. "
                 "برای دریافت بخش باقی‌مانده، سؤال تکمیلی بفرست."
