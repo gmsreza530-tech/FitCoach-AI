@@ -55,8 +55,8 @@ async def send_long_text(message: Message, text: str, limit=3900):
         await message.answer(chunk)
 
 
-def kb():
-    return ReplyKeyboardMarkup(keyboard=[
+def kb(show_coach_entry=False):
+    keyboard = [
       [KeyboardButton(text="👤 حساب کاربری"),KeyboardButton(text="👛 کیف پول")],
       [KeyboardButton(text="📝 تکمیل پروفایل"),KeyboardButton(text="👤 پروفایل من")],
       [KeyboardButton(text="🏋️ برنامه تمرین"),KeyboardButton(text="🥗 راهنمای تغذیه")],
@@ -66,7 +66,17 @@ def kb():
       [KeyboardButton(text="🏃 ثبت تمرین"),KeyboardButton(text="🍽 ثبت غذا")],
       [KeyboardButton(text="⚖️ اندازه‌گیری بدن"),KeyboardButton(text="🛌 چک‌این روزانه")],
       [KeyboardButton(text="📊 گزارش من"),KeyboardButton(text="ℹ️ راهنما")]
-    ],resize_keyboard=True)
+    ]
+    if show_coach_entry:
+        keyboard.append([KeyboardButton(text="🧑‍🏫 بازگشت به پنل مربی")])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+def coach_kb():
+    return ReplyKeyboardMarkup(keyboard=[
+      [KeyboardButton(text="👥 ورزشکاران من"), KeyboardButton(text="📥 درخواست‌های بررسی")],
+      [KeyboardButton(text="📚 دانش اختصاصی"), KeyboardButton(text="📤 راهنمای بارگذاری دانش")],
+      [KeyboardButton(text="🏋️ امکانات ورزشی من")]
+    ], resize_keyboard=True)
 
 def is_coach(uid): return uid in COACH_IDS or uid in ADMIN_IDS
 
@@ -81,11 +91,18 @@ async def main():
         uid = m.from_user.id
         role = "admin" if uid in ADMIN_IDS else ("coach" if uid in COACH_IDS else "athlete")
         register_account(m.from_user, role=role)
-        await m.answer(
-        "به FitCoach AI خوش آمدی. 🏋️\n"
-        "ابتدا پروفایل را تکمیل کن. این ربات ابزار آموزشی است و جایگزین پزشک نیست.",
-        reply_markup=kb()
-        )
+        if is_coach(uid):
+            await m.answer(
+                "به FitCoach AI خوش آمدی. 🧑‍🏫\n"
+                "از پنل مربی برای مدیریت استفاده کن؛ برای تمرین شخصی، امکانات ورزشی من را باز کن.",
+                reply_markup=coach_kb()
+            )
+        else:
+            await m.answer(
+                "به FitCoach AI خوش آمدی. 🏋️\n"
+                "ابتدا پروفایل را تکمیل کن. این ربات ابزار آموزشی است و جایگزین پزشک نیست.",
+                reply_markup=kb()
+            )
 
     @dp.message(Command("cancel"))
     async def cancel(m:Message,state:FSMContext):
@@ -413,20 +430,64 @@ async def main():
         delete_athlete_data(m.from_user.id)
         await m.answer("اطلاعات ورزشی ذخیره‌شده این حساب حذف شد. برای استفاده دوباره پروفایل را از نو بساز.")
 
+    async def show_coach_panel(m: Message):
+        if not is_coach(m.from_user.id):
+            return await m.answer("⛔ این بخش فقط برای مربی مجاز است.")
+        await m.answer("🧑‍🏫 پنل اختصاصی مربی\nاز دکمه‌های زیر برای مدیریت استفاده کن.", reply_markup=coach_kb())
+
+    @dp.message(F.text == "🧑‍🏫 بازگشت به پنل مربی")
+    async def return_coach_panel(m: Message):
+        await show_coach_panel(m)
+
+    @dp.message(F.text == "🏋️ امکانات ورزشی من")
+    async def coach_athlete_mode(m: Message):
+        if not is_coach(m.from_user.id):
+            return await m.answer("⛔ دسترسی غیرمجاز است.")
+        await m.answer("حالت ورزشکار برای حساب شخصی مربی فعال شد.", reply_markup=kb(show_coach_entry=True))
+
+    @dp.message(F.text == "👥 ورزشکاران من")
+    async def coach_athletes_placeholder(m: Message):
+        if not is_coach(m.from_user.id):
+            return await m.answer("⛔ دسترسی غیرمجاز است.")
+        await m.answer("مدیریت پرونده و فهرست ورزشکاران در گام بعدی تکمیل می‌شود.", reply_markup=coach_kb())
+
+    @dp.message(F.text == "📥 درخواست‌های بررسی")
+    async def coach_pending_button(m: Message):
+        if not is_coach(m.from_user.id):
+            return await m.answer("⛔ دسترسی غیرمجاز است.")
+        items = pending(m.from_user.id)
+        if not items:
+            return await m.answer("درخواست معلقی وجود ندارد.")
+        for item in items[-10:]:
+            await send_long_text(m, f"درخواست #{item['id']}\\nورزشکار: {item['athlete_id']} | نوع: {item['kind']}\\n{item['content']}\\nتأیید: /approve {item['id']}\\nرد: /reject {item['id']} دلیل")
+
+    @dp.message(F.text == "📚 دانش اختصاصی")
+    async def coach_knowledge_button(m: Message):
+        if not is_coach(m.from_user.id):
+            return await m.answer("⛔ دسترسی غیرمجاز است.")
+        with db() as c:
+            count = c.execute("SELECT COUNT(*) FROM coach_knowledge WHERE coach_id=?", (m.from_user.id,)).fetchone()[0]
+        await m.answer(f"📚 دانش اختصاصی شما\\nتعداد ردیف‌های ثبت‌شده: {count}")
+
+    @dp.message(F.text == "📤 راهنمای بارگذاری دانش")
+    async def coach_upload_help(m: Message):
+        if not is_coach(m.from_user.id):
+            return await m.answer("⛔ دسترسی غیرمجاز است.")
+        await m.answer("فایل Excel با پسوند xlsx یا xlsm را همین‌جا ارسال کن. حداکثر حجم ۸ مگابایت است.")
+
     @dp.message(Command("coach"))
     async def coach_panel(m):
-        if not is_coach(m.from_user.id): return await m.answer("این بخش مخصوص مربی است.")
-        await m.answer("📚 پنل مربی\nبرای افزودن دانش و روش مربی، فایل Excel با فرمت xlsx را همین‌جا ارسال کن.\n/pending برای درخواست‌ها\n/knowledge برای تعداد ردیف‌های دانش")
+        await show_coach_panel(m)
 
     @dp.message(Command("knowledge"))
     async def knowledge_count(m):
-        if not is_coach(m.from_user.id): return
+        if not is_coach(m.from_user.id): return await m.answer("⛔ این فرمان فقط برای مربی مجاز است.")
         with db() as c: n=c.execute("SELECT COUNT(*) FROM coach_knowledge WHERE coach_id=?",(m.from_user.id,)).fetchone()[0]
         await m.answer(f"ردیف‌های دانش واردشده: {n}")
 
     @dp.message(F.document)
     async def excel_upload(m):
-        if not is_coach(m.from_user.id): return
+        if not is_coach(m.from_user.id): return await m.answer("⛔ بارگذاری فایل فقط برای مربی مجاز است.")
         doc=m.document
         if not doc.file_name.lower().endswith((".xlsx",".xlsm")): return await m.answer("فقط فایل Excel با پسوند xlsx یا xlsm ارسال کن.")
         if doc.file_size and doc.file_size>8*1024*1024: return await m.answer("حداکثر حجم فایل ۸ مگابایت است.")
@@ -443,7 +504,7 @@ async def main():
 
     @dp.message(Command("pending"))
     async def pending_cmd(m):
-        if not is_coach(m.from_user.id): return
+        if not is_coach(m.from_user.id): return await m.answer("⛔ این فرمان فقط برای مربی مجاز است.")
         items=pending(m.from_user.id)
         if not items: return await m.answer("درخواست معلقی وجود ندارد.")
         for x in items[-10:]:
@@ -451,7 +512,7 @@ async def main():
 
     @dp.message(Command("approve"))
     async def approve_cmd(m):
-        if not is_coach(m.from_user.id): return
+        if not is_coach(m.from_user.id): return await m.answer("⛔ این فرمان فقط برای مربی مجاز است.")
         try: pid=int(m.text.split()[1])
         except: return await m.answer("فرمت: /approve ID")
         x=get_program(pid)
@@ -466,7 +527,7 @@ async def main():
 
     @dp.message(Command("reject"))
     async def reject_cmd(m):
-        if not is_coach(m.from_user.id): return
+        if not is_coach(m.from_user.id): return await m.answer("⛔ این فرمان فقط برای مربی مجاز است.")
         parts=m.text.split(maxsplit=2)
         if len(parts)<2: return await m.answer("فرمت: /reject ID توضیح")
         try: pid=int(parts[1])
@@ -544,7 +605,10 @@ async def main():
 
     @dp.message(F.text=="ℹ️ راهنما")
     async def help_msg(m):
-        await m.answer("راهنما: پروفایل را تکمیل کن؛ سپس برنامه تمرین، تغذیه، ثبت تمرین، ثبت غذا، اندازه‌گیری بدن، چک‌این و گزارش را استفاده کن.\nمربی: /coach و ارسال فایل Excel\nلغو: /cancel\nبرنامه‌های قبلی پس از پایان اشتراک نیز قابل مشاهده‌اند.")
+        if is_coach(m.from_user.id):
+            await m.answer("راهنما: برای مدیریت از پنل مربی و برای تمرین شخصی از امکانات ورزشی من استفاده کن.\nلغو عملیات: /cancel", reply_markup=coach_kb())
+        else:
+            await m.answer("راهنما: پروفایل را تکمیل کن؛ سپس از برنامه تمرین، تغذیه، ثبت تمرین، غذا، اندازه‌گیری، چک‌این و گزارش استفاده کن.\nلغو عملیات: /cancel\nبرنامه‌های قبلی پس از پایان اشتراک نیز قابل مشاهده‌اند.", reply_markup=kb())
 
     @dp.message(F.text)
     async def active_chat_fallback(m: Message):
