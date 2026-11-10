@@ -57,6 +57,7 @@ async def send_long_text(message: Message, text: str, limit=3900):
 
 def kb():
     return ReplyKeyboardMarkup(keyboard=[
+      [KeyboardButton(text="👤 حساب کاربری"),KeyboardButton(text="👛 کیف پول")],
       [KeyboardButton(text="📝 تکمیل پروفایل"),KeyboardButton(text="👤 پروفایل من")],
       [KeyboardButton(text="🏋️ برنامه تمرین"),KeyboardButton(text="🥗 راهنمای تغذیه")],
       [KeyboardButton(text="💬 سؤال از مربی"),KeyboardButton(text="📈 ثبت پیشرفت")],
@@ -77,6 +78,9 @@ async def main():
     @dp.message(CommandStart())
     async def start(m: Message, state: FSMContext):
         await state.clear()
+        uid = m.from_user.id
+        role = "admin" if uid in ADMIN_IDS else ("coach" if uid in COACH_IDS else "athlete")
+        register_account(m.from_user, role=role)
         await m.answer(
         "به FitCoach AI خوش آمدی. 🏋️\n"
         "ابتدا پروفایل را تکمیل کن. این ربات ابزار آموزشی است و جایگزین پزشک نیست.",
@@ -132,6 +136,43 @@ async def main():
     async def f13(m: Message, state: FSMContext):
         await state.update_data(notes=(m.text or "")[:700]); d=await state.get_data(); save_profile(m.from_user.id,d); await state.clear()
         await m.answer("پروفایل ذخیره شد. اکنون می‌توانی از امکانات استفاده کنی.",reply_markup=kb())
+
+    @dp.message(F.text=="👤 حساب کاربری")
+    async def show_account(m: Message):
+        uid = m.from_user.id
+        role = "مدیر" if uid in ADMIN_IDS else ("مربی" if uid in COACH_IDS else "ورزشکار")
+        p = profile(uid)
+        a = account_info(uid)
+        name = (a or {}).get("first_name") or m.from_user.first_name or "کاربر"
+        username = f"@{a['username']}" if a and a.get("username") else "ثبت نشده"
+        profile_status = "تکمیل‌شده" if p else "تکمیل‌نشده"
+        await m.answer(
+            "👤 حساب کاربری FitCoach AI\n"
+            f"نام: {name}\n"
+            f"شناسه تلگرام: `{uid}`\n"
+            f"نام کاربری: {username}\n"
+            f"نقش: {role}\n"
+            f"وضعیت پروفایل ورزشی: {profile_status}\n"
+            f"موجودی کیف پول: {wallet_balance(uid):,} تومان"
+        )
+
+    @dp.message(F.text=="👛 کیف پول")
+    async def show_wallet(m: Message):
+        uid = m.from_user.id
+        balance = wallet_balance(uid)
+        history = wallet_history(uid, limit=5)
+        lines = ["👛 کیف پول FitCoach AI", f"موجودی: {balance:,} تومان"]
+        if history:
+            lines.append("\\nآخرین تراکنش‌ها:")
+            for item in history:
+                sign = "+" if item["amount"] > 0 else ""
+                lines.append(
+                    f"• {sign}{item['amount']:,} تومان | {item['description'] or item['transaction_type']}"
+                )
+        else:
+            lines.append("\\nهنوز تراکنشی ثبت نشده است.")
+        lines.append("\\nافزایش موجودی و پرداخت آنلاین در مرحله اتصال درگاه فعال خواهد شد.")
+        await m.answer("\\n".join(lines))
 
     @dp.message(F.text=="👤 پروفایل من")
     async def show_profile(m):
