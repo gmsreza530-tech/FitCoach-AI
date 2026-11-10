@@ -91,7 +91,7 @@ def format_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -> 
             rest = _clean(exercise.get("rest"), "استراحت", max_length=40)
             rir = _clean(exercise.get("rir"), "RIR", required=False, max_length=30)
             note = _clean(exercise.get("note"), "نکته اجرا", required=False, max_length=220)
-            lines.append(f"{ex_index}. **{ex_name}**")
+            lines.append(f"{ex_index}. {ex_name}")
             lines.append(f"   • ست: {sets}  |  تکرار: {reps}")
             lines.append(f"   • استراحت: {rest}" + (f"  |  RIR: {rir}" if rir else ""))
             if note:
