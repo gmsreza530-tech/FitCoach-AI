@@ -206,16 +206,41 @@ async def main():
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
         coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
         if kind == "workout":
-            raw_answer = await asyncio.to_thread(ask, p, question, coach_id, output_format="workout_json")
-            try:
-                quality_warnings = validate_workout_plan(raw_answer, p)
-                answer = format_workout_plan(raw_answer, p)
-            except WorkoutFormatError as exc:
-                logger_msg = f"Workout output validation failed: {exc}"
-                print(logger_msg)
+            quality_warnings = []
+            answer = None
+            validation_error = None
+
+            # One corrective retry is safer than exposing an incomplete plan.
+            for attempt in range(2):
+                retry_question = question
+                if validation_error:
+                    retry_question += (
+                        "\\n\\nاصلاح اجباری خروجی قبلی: اعتبارسنجی برنامه این خطا را گزارش کرد: "
+                        + validation_error
+                        + ". یک برنامه کامل و تازه تولید کن؛ فقط JSON معتبر مطابق ساختار خواسته‌شده، "
+                        "تعداد روزهای دقیقاً برابر پروفایل، و تمام فیلدهای اجباری هر حرکت. "
+                        "خروجی قبلی را ادامه نده و متن ناقص را تکرار نکن."
+                    )
+
+                raw_answer = await asyncio.to_thread(
+                    ask, p, retry_question, coach_id, output_format="workout_json"
+                )
+                try:
+                    quality_warnings = validate_workout_plan(raw_answer, p)
+                    answer = format_workout_plan(raw_answer, p)
+                    validation_error = None
+                    break
+                except WorkoutFormatError as exc:
+                    validation_error = str(exc)
+                    print(
+                        f"Workout validation failed (attempt {attempt + 1}/2): "
+                        f"{validation_error}; raw_length={len(raw_answer or '')}"
+                    )
+
+            if answer is None:
                 return await m.answer(
-                    "هوش مصنوعی این بار برنامه را با ساختار استاندارد تولید نکرد. "
-                    "برای جلوگیری از نمایش برنامه ناقص، آن را ارسال نکردم. لطفاً دوباره تلاش کن."
+                    "ساخت برنامه در دو تلاش ناموفق بود و برای جلوگیری از ارسال برنامه ناقص متوقف شد. "
+                    "لطفاً دوباره تلاش کن؛ اگر تکرار شد، گزارش خطای Runtime Logs را برای بررسی بفرست."
                 )
         else:
             answer=await asyncio.to_thread(ask,p,question,coach_id)
