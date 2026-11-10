@@ -114,6 +114,16 @@ def init():
         CREATE INDEX IF NOT EXISTS idx_checkin_athlete_date ON daily_checkins(athlete_id,created_at);
         CREATE INDEX IF NOT EXISTS idx_conversations_athlete_id ON conversations(athlete_id,id);
         """)
+        # Backfill account rows for athletes already present before this migration.
+        c.execute(
+            """
+            INSERT OR IGNORE INTO accounts
+              (telegram_id, role, created_at, updated_at)
+            SELECT telegram_id, 'athlete', COALESCE(created_at, ?), COALESCE(updated_at, ?)
+            FROM athletes
+            """,
+            (now(), now()),
+        )
         c.execute(
             "INSERT OR IGNORE INTO access"
             "(athlete_id,plan_type,expires_at,plans_limit,plans_used,updated_at) "
@@ -183,7 +193,7 @@ def add_wallet_transaction(uid, amount, transaction_type, description="",
                 INSERT INTO wallet_transactions
                   (telegram_id, amount, currency, transaction_type, description,
                    reference, created_by, created_at)
-                VALUES (?, ?, 'IRT', ?, ?, ?, ?, ?)
+                VALUES (?, ?, 'TOMAN', ?, ?, ?, ?, ?)
                 """,
                 (int(uid), amount, transaction_type, str(description)[:300],
                  reference, created_by, now()),
