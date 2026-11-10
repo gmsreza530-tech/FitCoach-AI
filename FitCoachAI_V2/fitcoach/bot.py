@@ -106,7 +106,7 @@ async def main():
 
     @dp.message(Command("cancel"))
     async def cancel(m:Message,state:FSMContext):
-        await state.clear(); await m.answer("عملیات لغو شد.",reply_markup=kb())
+        await state.clear(); await m.answer("عملیات لغو شد.",reply_markup=coach_kb() if is_coach(m.from_user.id) else kb())
 
     @dp.message(F.text=="📝 تکمیل پروفایل")
     async def begin(m:Message,state:FSMContext):
@@ -152,7 +152,7 @@ async def main():
     @dp.message(Form.notes)
     async def f13(m: Message, state: FSMContext):
         await state.update_data(notes=(m.text or "")[:700]); d=await state.get_data(); save_profile(m.from_user.id,d); await state.clear()
-        await m.answer("پروفایل ذخیره شد. اکنون می‌توانی از امکانات استفاده کنی.",reply_markup=kb())
+        await m.answer("پروفایل ذخیره شد. اکنون می‌توانی از امکانات استفاده کنی.",reply_markup=kb(show_coach_entry=is_coach(m.from_user.id)))
 
     @dp.message(F.text=="👤 حساب کاربری")
     async def show_account(m: Message):
@@ -267,7 +267,7 @@ async def main():
     async def end_chat_command(m: Message, state: FSMContext):
         end_conversation(m.from_user.id)
         await state.clear()
-        await m.answer("گفت‌وگو پایان یافت؛ تاریخچه محفوظ است.", reply_markup=kb())
+        await m.answer("گفت‌وگو پایان یافت؛ تاریخچه محفوظ است.", reply_markup=kb(show_coach_entry=is_coach(m.from_user.id)))
 
     @dp.message(F.text=="🔚 پایان گفتگو")
     async def end_chat_button(m: Message, state: FSMContext):
