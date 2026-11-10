@@ -9,6 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from fitcoach.config import BOT_TOKEN,COACH_IDS,ADMIN_IDS,APPROVAL_MODE,UPLOAD_DIR,SUBSCRIPTION_DAYS,SUBSCRIPTION_PLAN_LIMIT,FREE_MODE
 from fitcoach.db import *
 from fitcoach.ai import ask
+from fitcoach.program_formatter import format_workout_plan, WorkoutFormatError
 from fitcoach.excel_import import import_excel
 from fitcoach.video_analysis import analyze_video
 
@@ -146,7 +147,19 @@ async def main():
         if not ok: return await m.answer(msg+"\nبرای فعال‌سازی، با مربی تماس بگیر.")
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
         coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
-        answer=await asyncio.to_thread(ask,p,question,coach_id)
+        if kind == "workout":
+            raw_answer = await asyncio.to_thread(ask, p, question, coach_id, output_format="workout_json")
+            try:
+                answer = format_workout_plan(raw_answer, p)
+            except WorkoutFormatError as exc:
+                logger_msg = f"Workout output validation failed: {exc}"
+                print(logger_msg)
+                return await m.answer(
+                    "هوش مصنوعی این بار برنامه را با ساختار استاندارد تولید نکرد. "
+                    "برای جلوگیری از نمایش برنامه ناقص، آن را ارسال نکردم. لطفاً دوباره تلاش کن."
+                )
+        else:
+            answer=await asyncio.to_thread(ask,p,question,coach_id)
         status="pending" if APPROVAL_MODE=="both" else "approved"
         pid=create_program(m.from_user.id,coach_id,kind,question,answer,status)
         if status=="pending":
