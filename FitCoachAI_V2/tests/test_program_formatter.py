@@ -15,6 +15,9 @@ VALID = {
             "exercises": [
                 {
                     "name": "اسکوات",
+                    "movement_pattern": "squat",
+                    "muscle_groups": ["quadriceps", "glutes"],
+                    "skill_level": "beginner",
                     "sets": "۳",
                     "reps": "۸ تا ۱۰",
                     "rest": "۱۲۰ ثانیه",
