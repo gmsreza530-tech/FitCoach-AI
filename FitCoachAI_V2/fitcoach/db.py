@@ -29,6 +29,33 @@ def init():
           height REAL, weight REAL, goal TEXT, experience TEXT, equipment TEXT,
           days INTEGER, recovery TEXT, limitations TEXT, medication TEXT, notes TEXT,
           created_at TEXT, updated_at TEXT);
+        
+        CREATE TABLE IF NOT EXISTS accounts(
+          telegram_id INTEGER PRIMARY KEY,
+          username TEXT,
+          first_name TEXT,
+          last_name TEXT,
+          role TEXT NOT NULL DEFAULT 'athlete' CHECK(role IN ('athlete','coach','admin')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS wallet_transactions(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          telegram_id INTEGER NOT NULL,
+          amount INTEGER NOT NULL CHECK(amount != 0),
+          currency TEXT NOT NULL DEFAULT 'IRT',
+          transaction_type TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          reference TEXT UNIQUE,
+          created_by INTEGER,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(telegram_id) REFERENCES accounts(telegram_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_wallet_user_date
+          ON wallet_transactions(telegram_id, created_at, id);
+
+
 
         CREATE TABLE IF NOT EXISTS coach_knowledge(
           id INTEGER PRIMARY KEY AUTOINCREMENT, coach_id INTEGER, source_file TEXT,
@@ -93,6 +120,98 @@ def init():
             "VALUES(?,?,?,?,?,?)",
             (0, "none", "1970-01-01T00:00:00+00:00", 0, 0, now()),
         )
+
+
+# ---------------------------------------------------------------------------
+# Telegram account identity and append-only wallet ledger
+# ---------------------------------------------------------------------------
+
+def register_account(telegram_user, role="athlete"):
+    """Upsert Telegram identity while preserving the immutable Telegram user ID."""
+    if role not in {"athlete", "coach", "admin"}:
+        raise ValueError("invalid account role")
+    uid = int(telegram_user.id)
+    timestamp = now()
+    with db() as c:
+        c.execute(
+            """
+            INSERT INTO accounts
+              (telegram_id, username, first_name, last_name, role, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+              username=excluded.username,
+              first_name=excluded.first_name,
+              last_name=excluded.last_name,
+              role=excluded.role,
+              updated_at=excluded.updated_at
+            """,
+            (uid, telegram_user.username, telegram_user.first_name,
+             telegram_user.last_name, role, timestamp, timestamp),
+        )
+        row = c.execute("SELECT * FROM accounts WHERE telegram_id=?", (uid,)).fetchone()
+        return dict(row)
+
+
+def account_info(uid):
+    with db() as c:
+        row = c.execute("SELECT * FROM accounts WHERE telegram_id=?", (int(uid),)).fetchone()
+        return dict(row) if row else None
+
+
+def wallet_balance(uid):
+    """Wallet balance is derived from the immutable ledger; no mutable balance field."""
+    with db() as c:
+        row = c.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS balance FROM wallet_transactions WHERE telegram_id=?",
+            (int(uid),),
+        ).fetchone()
+        return int(row["balance"])
+
+
+def add_wallet_transaction(uid, amount, transaction_type, description="",
+                           reference=None, created_by=None):
+    """Append a wallet entry. A unique reference makes retries idempotent."""
+    amount = int(amount)
+    if amount == 0:
+        raise ValueError("wallet transaction amount cannot be zero")
+    if transaction_type not in {"topup", "purchase", "refund", "adjustment"}:
+        raise ValueError("invalid wallet transaction type")
+    with db() as c:
+        try:
+            cur = c.execute(
+                """
+                INSERT INTO wallet_transactions
+                  (telegram_id, amount, currency, transaction_type, description,
+                   reference, created_by, created_at)
+                VALUES (?, ?, 'IRT', ?, ?, ?, ?, ?)
+                """,
+                (int(uid), amount, transaction_type, str(description)[:300],
+                 reference, created_by, now()),
+            )
+            return cur.lastrowid
+        except sqlite3.IntegrityError:
+            if reference:
+                row = c.execute(
+                    "SELECT id FROM wallet_transactions WHERE reference=?", (reference,)
+                ).fetchone()
+                if row:
+                    return row["id"]
+            raise
+
+
+def wallet_history(uid, limit=10):
+    limit = max(1, min(int(limit), 50))
+    with db() as c:
+        return [
+            dict(row) for row in c.execute(
+                """
+                SELECT id, amount, currency, transaction_type, description, reference, created_at
+                FROM wallet_transactions WHERE telegram_id=?
+                ORDER BY id DESC LIMIT ?
+                """,
+                (int(uid), limit),
+            ).fetchall()
+        ]
 
 
 # ---------------------------------------------------------------------------
