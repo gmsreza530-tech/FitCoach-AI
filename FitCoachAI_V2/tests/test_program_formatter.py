@@ -61,5 +61,11 @@ class WorkoutFormatterTests(unittest.TestCase):
         self.assertIn("برنامه تمرینی FitCoach AI", result)
 
 
+    def test_rejects_session_count_mismatch_with_profile(self):
+        two_sessions = dict(VALID)
+        two_sessions["weekly_schedule"] = [VALID["weekly_schedule"][0], VALID["weekly_schedule"][0]]
+        with self.assertRaisesRegex(WorkoutFormatError, "با پروفایل ورزشکار"):
+            format_workout_plan(two_sessions, {"days": 4})
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from fitcoach.config import BOT_TOKEN,COACH_IDS,ADMIN_IDS,APPROVAL_MODE,UPLOAD_DIR,SUBSCRIPTION_DAYS,SUBSCRIPTION_PLAN_LIMIT,FREE_MODE
 from fitcoach.db import *
 from fitcoach.ai import ask
-from fitcoach.program_formatter import format_workout_plan, validate_workout_plan, WorkoutFormatError
+from fitcoach.program_formatter import format_workout_plan, validate_workout_plan, WorkoutFormatError, _profile_days
 from fitcoach.excel_import import import_excel
 from fitcoach.video_analysis import analyze_video
 
@@ -201,6 +201,12 @@ async def main():
     async def generate(m,kind,question):
         p=profile(m.from_user.id)
         if not p: return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        if kind == "workout" and _profile_days(p) is None:
+            return await m.answer(
+                "برای ساخت برنامه دقیق، تعداد جلسات تمرین در هفته در پروفایلت مشخص یا معتبر نیست. "
+                "از بخش «تکمیل پروفایل» تعداد جلسات را بین ۱ تا ۷ ثبت کن؛ "
+                "تا آن زمان هیچ درخواست AI یا سهمیه برنامه مصرف نمی‌شود."
+            )
         ok,msg=consume_plan(m.from_user.id)
         if not ok: return await m.answer(msg+"\nبرای فعال‌سازی، با مربی تماس بگیر.")
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
