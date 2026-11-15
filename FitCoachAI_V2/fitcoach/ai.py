@@ -152,10 +152,29 @@ def ask(
         },
     ]
     if output_format == "workout_json":
+        # Pass the complete profile as source-of-truth and make the session
+        # count an explicit, machine-checkable constraint before generation.
+        from fitcoach.program_formatter import _profile_days
+
+        expected_days = _profile_days(profile)
+        session_rule = (
+            f"قانون قطعی تعداد جلسات: این ورزشکار دقیقاً {expected_days} جلسه تمرین در هفته دارد. "
+            f"آرایه weekly_schedule باید دقیقاً {expected_days} عضو داشته باشد؛ نه بیشتر و نه کمتر. "
+            "هر عضو فقط یک جلسه تمرینی واقعی است. روزهای استراحت را اصلاً داخل weekly_schedule قرار نده. "
+            "تعداد جلسات را با ۷ روز تقویمی هفته اشتباه نگیر. "
+            if expected_days is not None
+            else
+            "تعداد جلسات هفتگی در پروفایل معتبر نیست؛ تعداد جلسه را حدس نزن و به‌جای ساخت برنامه، "
+            "یک سؤال کوتاه برای مشخص‌شدن تعداد جلسات بپرس. "
+        )
         messages.append({
             "role": "system",
             "content": (
-                "خروجی فقط یک شیء JSON معتبر و بدون Markdown باشد. "
+                "پروفایل کامل پیام سیستم قبلی منبع حقیقت است؛ تمام فیلدهای موجود را قبل از طراحی بررسی کن. "
+                "هیچ داده‌ای را نادیده نگیر یا جعل نکن. هدف، سطح تجربه، تجهیزات، ریکاوری، آسیب‌ها، "
+                "محدودیت‌ها، دارو و توضیحات تکمیلی باید در انتخاب حرکات، حجم و شدت اثر داشته باشند. "
+                + session_rule
+                + "خروجی فقط یک شیء JSON معتبر و بدون Markdown باشد. "
                 "هیچ متن قبل یا بعد JSON ننویس. ساختار دقیق: "
                 '{"title":"عنوان","goal":"هدف","warmup":"گرم‌کردن",'
                 '"weekly_schedule":[{"day":"روز اول","focus":"Push یا Pull یا Legs یا Full Body",'
@@ -169,7 +188,7 @@ def ask(
                 "horizontal_push, vertical_push, horizontal_pull, vertical_pull, squat, hinge, lunge, isolation, core, carry, power. "
                 "muscle_groups را فقط از این فهرست انتخاب کن: chest, back, shoulders, triceps, biceps, quadriceps, hamstrings, glutes, calves, core. "
                 "skill_level برای هر حرکت یکی از beginner, intermediate, advanced باشد. "
-                "تعداد روزهای برنامه باید دقیقاً با جلسات تمرین ثبت‌شده ورزشکار برابر باشد. "
+                "تعداد روزهای برنامه باید دقیقاً با قانون تعداد جلسات صریح بالا برابر باشد. "
                 "در روز Push حرکت کششی پشت یا بارفیکس قرار نده؛ در روز Pull حرکت فشاری سینه یا سرشانه قرار نده. "
                 "حرکت تکراری در یک روز نگذار و برای مبتدیان حرکت پیشرفته مانند بارفیکس وزنه‌دار، ماسل‌آپ یا اسنچ انتخاب نکن. "
                 "ست، تکرار، استراحت و RIR باید عددی و واقع‌بینانه باشند؛ RIR را بین صفر تا پنج نگه دار. "
@@ -184,7 +203,9 @@ def ask(
     try:
         client = Groq(api_key=GROQ_API_KEY)
         answer_parts: List[str] = []
-        max_continuations = 2
+        # JSON must be emitted as one complete document. Concatenating a
+        # truncated JSON prefix with a second completion corrupts the payload.
+        max_continuations = 0 if output_format == "workout_json" else 2
 
         for attempt in range(max_continuations + 1):
             response = client.chat.completions.create(
@@ -228,7 +249,11 @@ def ask(
         if not answer:
             return "پاسخ خالی از سرویس هوش مصنوعی دریافت شد. لطفاً درخواستت را دوباره بفرست."
 
-        if len(answer_parts) >= max_continuations + 1 and getattr(choice, "finish_reason", None) == "length":
+        if (
+            output_format != "workout_json"
+            and len(answer_parts) >= max_continuations + 1
+            and getattr(choice, "finish_reason", None) == "length"
+        ):
             answer += (
                 "\n\n⚠️ پاسخ بسیار طولانی بود و به سقف ادامه خودکار رسید. "
                 "برای دریافت بخش باقی‌مانده، سؤال تکمیلی بفرست."
