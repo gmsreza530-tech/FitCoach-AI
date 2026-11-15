@@ -164,6 +164,18 @@ def init():
       body_fat REAL, notes TEXT, created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS athlete_body_photos(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER NOT NULL,
+      telegram_file_id TEXT NOT NULL, view_type TEXT NOT NULL,
+      analysis TEXT NOT NULL, consented_at TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS body_measurement_details(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER NOT NULL,
+      hip REAL, shoulder REAL, forearm REAL, calf REAL, neck REAL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS daily_checkins(
       id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER NOT NULL,
       sleep_hours REAL, energy INTEGER, soreness INTEGER, adherence INTEGER,
@@ -180,6 +192,10 @@ def init():
       ON body_measurements(athlete_id,created_at);
     CREATE INDEX IF NOT EXISTS idx_checkin_athlete_date
       ON daily_checkins(athlete_id,created_at);
+    CREATE INDEX IF NOT EXISTS idx_body_photos_athlete_date
+      ON athlete_body_photos(athlete_id,created_at);
+    CREATE INDEX IF NOT EXISTS idx_measure_details_athlete_date
+      ON body_measurement_details(athlete_id,created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_athlete_id
       ON conversations(athlete_id,id);
     CREATE INDEX IF NOT EXISTS idx_coach_athletes_coach
@@ -783,12 +799,66 @@ def recent_rows(table, uid, limit=30):
         ]
 
 
+
+def save_body_photo(uid, telegram_file_id, view_type, analysis, consented_at):
+    """Store Telegram's file reference and analysis; raw image bytes are never persisted."""
+    allowed_views = {"front", "side", "back"}
+    if view_type not in allowed_views:
+        raise ValueError("invalid body photo view")
+    with db() as c:
+        row = c.execute(
+            "INSERT INTO athlete_body_photos"
+            "(athlete_id,telegram_file_id,view_type,analysis,consented_at,created_at) "
+            "VALUES(?,?,?,?,?,?) RETURNING id",
+            (int(uid), str(telegram_file_id), view_type, str(analysis)[:12000],
+             str(consented_at), now()),
+        ).fetchone()
+        return row["id"]
+
+
+def latest_body_assessment(uid):
+    """Return the latest non-diagnostic image summary and latest circumference details."""
+    with db() as c:
+        photos = c.execute(
+            "SELECT view_type,analysis,created_at FROM athlete_body_photos "
+            "WHERE athlete_id=? ORDER BY id DESC LIMIT 3", (int(uid),)
+        ).fetchall()
+        measures = c.execute(
+            "SELECT * FROM body_measurement_details WHERE athlete_id=? "
+            "ORDER BY id DESC LIMIT 1", (int(uid),)
+        ).fetchone()
+    lines = []
+    if photos:
+        lines.append("خلاصه تحلیل‌های تصویری اخیر (غیرتشخیصی):")
+        for row in reversed(list(photos)):
+            lines.append(f"- {row['view_type']}: {row['analysis']}")
+    if measures:
+        labels = {"hip":"دور باسن","shoulder":"دور سرشانه","forearm":"دور ساعد",
+                  "calf":"دور ساق","neck":"دور گردن"}
+        lines.append("اندازه‌های تکمیلی بدن (سانتی‌متر):")
+        for key,label in labels.items():
+            if measures[key] is not None:
+                lines.append(f"- {label}: {measures[key]}")
+    return "\n".join(lines) if lines else ""
+
+
+def add_extended_measurements(uid, hip=None, shoulder=None, forearm=None, calf=None, neck=None):
+    with db() as c:
+        row = c.execute(
+            "INSERT INTO body_measurement_details"
+            "(athlete_id,hip,shoulder,forearm,calf,neck,created_at) "
+            "VALUES(?,?,?,?,?,?,?) RETURNING id",
+            (int(uid), hip, shoulder, forearm, calf, neck, now()),
+        ).fetchone()
+        return row["id"]
+
+
 def delete_athlete_data(uid):
     with db() as c:
         for table in (
             "athletes", "progress", "access", "programs", "conversations",
             "conversation_sessions", "workout_logs", "nutrition_logs",
-            "body_measurements", "daily_checkins", "coach_athletes",
+            "body_measurements", "body_measurement_details", "athlete_body_photos", "daily_checkins", "coach_athletes",
         ):
             if table == "athletes":
                 c.execute("DELETE FROM athletes WHERE telegram_id=?", (uid,))
