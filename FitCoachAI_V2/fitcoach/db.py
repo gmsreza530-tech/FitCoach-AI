@@ -495,12 +495,21 @@ def pending(coach_id):
         ]
 
 
-def review(pid, status, note=""):
+def review(pid, status, note="", coach_id=None):
+    """Transition a pending program once; optionally enforce its owning coach."""
+    if status not in {"approved", "rejected"}:
+        raise ValueError("invalid review status")
+    where = "id=? AND status='pending'"
+    params = [status, now(), str(note)[:1000], int(pid)]
+    if coach_id is not None:
+        where += " AND coach_id=?"
+        params.append(int(coach_id))
     with db() as c:
-        c.execute(
-            "UPDATE programs SET status=?,reviewed_at=?,review_note=? WHERE id=?",
-            (status, now(), note, pid),
+        cursor = c.execute(
+            "UPDATE programs SET status=?,reviewed_at=?,review_note=? WHERE " + where,
+            tuple(params),
         )
+        return cursor.rowcount == 1
 
 
 # ---------------------------------------------------------------------------
@@ -551,25 +560,32 @@ def grant(uid, days=SUBSCRIPTION_DAYS, limit=SUBSCRIPTION_PLAN_LIMIT, plan="subs
 
 
 def consume_plan(uid):
+    """Atomically consume one plan slot; safe under concurrent requests."""
     if FREE_MODE:
         return True, "حالت رایگان آزمایشی فعال است."
-    access = access_info(uid)
-    if not access:
-        return False, "برای ساخت برنامه، ابتدا دسترسی خریداری یا توسط مربی فعال شود."
-    try:
-        expiry = datetime.fromisoformat(access["expires_at"])
-    except Exception:
-        return False, "دسترسی فعال نیست."
-    if expiry < datetime.now(timezone.utc):
-        return False, "اشتراک پایان یافته است. برنامه‌های قبلی همچنان قابل مشاهده‌اند."
-    if access["plans_used"] >= access["plans_limit"]:
-        return False, "سقف برنامه‌های این دوره تمام شده است."
+    timestamp = datetime.now(timezone.utc)
     with db() as c:
-        c.execute(
+        row = c.execute(
+            "SELECT expires_at, plans_limit, plans_used FROM access WHERE athlete_id=?",
+            (uid,),
+        ).fetchone()
+        if not row:
+            return False, "برای ساخت برنامه، ابتدا دسترسی خریداری یا توسط مربی فعال شود."
+        try:
+            expiry = datetime.fromisoformat(row["expires_at"])
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return False, "دسترسی فعال نیست."
+        if expiry < timestamp:
+            return False, "اشتراک پایان یافته است. برنامه‌های قبلی همچنان قابل مشاهده‌اند."
+        cursor = c.execute(
             "UPDATE access SET plans_used=plans_used+1,updated_at=? "
-            "WHERE athlete_id=?",
-            (now(), uid),
+            "WHERE athlete_id=? AND expires_at=? AND plans_used < plans_limit",
+            (timestamp.isoformat(), uid, row["expires_at"]),
         )
+        if cursor.rowcount != 1:
+            return False, "سقف برنامه‌های این دوره تمام شده است یا دسترسی تغییر کرده؛ دوباره تلاش کن."
     return True, "ok"
 
 
