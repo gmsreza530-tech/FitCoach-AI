@@ -43,6 +43,22 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertFalse(database.consume_plan(1001)[0])
         self.assertEqual(database.access_info(1001)["plans_used"], 1)
 
+    def test_athlete_roster_is_scoped_to_assigned_coach(self):
+        coach_one = type("TelegramUser", (), {
+            "id": 2002, "username": "coach1", "first_name": "Coach1",
+            "last_name": None,
+        })()
+        coach_two = type("TelegramUser", (), {
+            "id": 3003, "username": "coach2", "first_name": "Coach2",
+            "last_name": None,
+        })()
+        database.register_account(coach_one, role="coach")
+        database.register_account(coach_two, role="coach")
+        database.assign_athlete(1001, 2002)
+        self.assertEqual(database.athlete_coach(1001), 2002)
+        self.assertEqual([row["telegram_id"] for row in database.list_coach_athletes(2002)], [1001])
+        self.assertEqual(database.list_coach_athletes(3003), [])
+
     def test_review_is_pending_only_and_coach_scoped(self):
         program_id = database.create_program(
             1001, 2002, "workout", "request", "content", "pending"
