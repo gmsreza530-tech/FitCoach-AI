@@ -84,6 +84,9 @@ async def main():
     if not BOT_TOKEN: raise RuntimeError("BOT_TOKEN is missing")
     init(); UPLOAD_DIR.mkdir(exist_ok=True)
     bot=Bot(BOT_TOKEN); dp=Dispatcher(storage=MemoryStorage())
+    # Pose analysis is CPU-heavy; serialize it to prevent parallel uploads
+    # from exhausting the small production instance. Telegram handlers stay responsive.
+    video_semaphore = asyncio.Semaphore(1)
 
     @dp.message(CommandStart())
     async def start(m: Message, state: FSMContext):
@@ -674,7 +677,8 @@ async def main():
             try:
                 file = await bot.get_file(video.file_id)
                 await bot.download_file(file.file_path, destination=inp)
-                metrics = await asyncio.to_thread(analyze_video, str(inp), str(out))
+                async with video_semaphore:
+                    metrics = await asyncio.to_thread(analyze_video, str(inp), str(out))
                 caption = (
                     "✅ نسخه تصویری تحلیل آماده شد.\n"
                     f"مدت: {metrics['duration']} ثانیه\n"
