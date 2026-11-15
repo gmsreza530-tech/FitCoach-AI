@@ -559,6 +559,30 @@ def grant(uid, days=SUBSCRIPTION_DAYS, limit=SUBSCRIPTION_PLAN_LIMIT, plan="subs
         )
 
 
+def check_plan_access(uid):
+    """Read-only preflight: reject ineligible requests before spending AI tokens."""
+    if FREE_MODE:
+        return True, "حالت رایگان آزمایشی فعال است."
+    with db() as c:
+        row = c.execute(
+            "SELECT expires_at, plans_limit, plans_used FROM access WHERE athlete_id=?",
+            (uid,),
+        ).fetchone()
+    if not row:
+        return False, "برای ساخت برنامه، ابتدا دسترسی خریداری یا توسط مربی فعال شود."
+    try:
+        expiry = datetime.fromisoformat(row["expires_at"])
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False, "دسترسی فعال نیست."
+    if expiry < datetime.now(timezone.utc):
+        return False, "اشتراک پایان یافته است. برنامه‌های قبلی همچنان قابل مشاهده‌اند."
+    if row["plans_used"] >= row["plans_limit"]:
+        return False, "سقف برنامه‌های این دوره تمام شده است."
+    return True, "ok"
+
+
 def consume_plan(uid):
     """Atomically consume one plan slot; safe under concurrent requests."""
     if FREE_MODE:
