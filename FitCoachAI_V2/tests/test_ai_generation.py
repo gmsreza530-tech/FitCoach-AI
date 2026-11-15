@@ -77,5 +77,18 @@ class WorkoutJsonGenerationTests(unittest.TestCase):
         self.assertIn("weekly_schedule باید دقیقاً 4 عضو", system_text)
         self.assertIn("روزهای استراحت را اصلاً داخل weekly_schedule قرار نده", system_text)
 
+    @patch("fitcoach.ai.search_knowledge", return_value=[])
+    @patch("fitcoach.ai.Groq", side_effect=RuntimeError("provider unavailable"))
+    def test_provider_failure_raises_typed_error_instead_of_bad_json(self, _groq, _knowledge):
+        with patch.object(ai, "GROQ_API_KEY", "test-key"):
+            with self.assertRaises(ai.AIServiceError):
+                ai.ask({}, "برنامه تمرینی بساز", 123, output_format="workout_json")
+
+    def test_missing_api_key_fails_before_workout_generation(self):
+        with patch.object(ai, "GROQ_API_KEY", ""):
+            with self.assertRaises(ai.AIServiceError):
+                ai.ask({}, "برنامه تمرینی بساز", 123, output_format="workout_json")
+
+
 if __name__ == "__main__":
     unittest.main()

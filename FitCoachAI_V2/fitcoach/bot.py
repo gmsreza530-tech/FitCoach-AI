@@ -84,6 +84,9 @@ async def main():
     if not BOT_TOKEN: raise RuntimeError("BOT_TOKEN is missing")
     init(); UPLOAD_DIR.mkdir(exist_ok=True)
     bot=Bot(BOT_TOKEN); dp=Dispatcher(storage=MemoryStorage())
+    # Pose analysis is CPU-heavy; serialize it to prevent parallel uploads
+    # from exhausting the small production instance. Telegram handlers stay responsive.
+    video_semaphore = asyncio.Semaphore(1)
 
     @dp.message(CommandStart())
     async def start(m: Message, state: FSMContext):
@@ -91,6 +94,13 @@ async def main():
         uid = m.from_user.id
         role = "admin" if uid in ADMIN_IDS else ("coach" if uid in COACH_IDS else "athlete")
         register_account(m.from_user, role=role)
+        # Safe automatic assignment only when exactly one coach is configured.
+        if role == "athlete" and len(COACH_IDS) == 1 and athlete_coach(uid) is None:
+            configured_coach_id = next(iter(COACH_IDS))
+            # The coach must have opened the bot once so their account role exists.
+            coach_account = account_info(configured_coach_id)
+            if coach_account and coach_account.get("role") == "coach":
+                assign_athlete(uid, configured_coach_id)
         if is_coach(uid):
             await m.answer(
                 "به FitCoach AI خوش آمدی. 🧑‍🏫\n"
@@ -207,10 +217,13 @@ async def main():
                 "از بخش «تکمیل پروفایل» تعداد جلسات را بین ۱ تا ۷ ثبت کن؛ "
                 "تا آن زمان هیچ درخواست AI یا سهمیه برنامه مصرف نمی‌شود."
             )
-        ok,msg=consume_plan(m.from_user.id)
-        if not ok: return await m.answer(msg+"\nبرای فعال‌سازی، با مربی تماس بگیر.")
+        allowed, access_message = check_plan_access(m.from_user.id)
+        if not allowed:
+            return await m.answer(access_message + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
+        coach_id = athlete_coach(m.from_user.id)
+        if coach_id is None:
+            return await m.answer("هنوز مربی به حساب تو اختصاص داده نشده است. مدیر باید با دستور /assign شناسه_ورزشکار شناسه_مربی این اتصال را انجام دهد.")
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
-        coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
         if kind == "workout":
             quality_warnings = []
             answer = None
@@ -236,9 +249,13 @@ async def main():
                         "خروجی قبلی را ادامه نده، تعداد جلسات را تغییر نده و متن ناقص را تکرار نکن."
                     )
 
-                raw_answer = await asyncio.to_thread(
-                    ask, p, retry_question, coach_id, output_format="workout_json"
-                )
+                try:
+                    raw_answer = await asyncio.to_thread(
+                        ask, p, retry_question, coach_id, output_format="workout_json"
+                    )
+                except Exception as exc:
+                    print(f"Workout AI provider failure: {type(exc).__name__}: {exc}")
+                    return await m.answer("سرویس هوش مصنوعی موقتاً پاسخ نداد. هیچ سهمیه‌ای مصرف نشد؛ چند دقیقه بعد دوباره تلاش کن.")
                 try:
                     quality_warnings = validate_workout_plan(raw_answer, p)
                     answer = format_workout_plan(raw_answer, p)
@@ -257,10 +274,19 @@ async def main():
                     "لطفاً دوباره تلاش کن؛ اگر تکرار شد، گزارش خطای Runtime Logs را برای بررسی بفرست."
                 )
         else:
-            answer=await asyncio.to_thread(ask,p,question,coach_id)
+            try:
+                answer=await asyncio.to_thread(ask,p,question,coach_id)
+            except Exception as exc:
+                print(f"AI provider failure: {type(exc).__name__}: {exc}")
+                return await m.answer("سرویس هوش مصنوعی موقتاً پاسخ نداد. هیچ سهمیه‌ای مصرف نشد؛ چند دقیقه بعد دوباره تلاش کن.")
+        # Persist the completed plan and consume quota in one DB transaction.
         # Any quality warning or declared health constraint requires human review.
         status="pending" if (APPROVAL_MODE=="both" or (kind == "workout" and quality_warnings)) else "approved"
-        pid=create_program(m.from_user.id,coach_id,kind,question,answer,status)
+        pid, ok, msg = create_program_with_quota(
+            m.from_user.id, coach_id, kind, question, answer, status
+        )
+        if not ok:
+            return await m.answer(msg + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
         if status=="pending":
             await m.answer(f"درخواست برنامه ثبت شد و برای تأیید مربی ارسال شد. کد پیگیری: {pid}")
             if coach_id:
@@ -283,11 +309,17 @@ async def main():
         if not question:
             return await m.answer("لطفاً پیام متنی بفرست.")
         question = question[:12000]
-        coach_id = next(iter(COACH_IDS), next(iter(ADMIN_IDS), 0))
+        coach_id = athlete_coach(uid)
+        if coach_id is None:
+            return await m.answer("هنوز مربی به حساب تو اختصاص داده نشده است. مدیر باید اتصال مربی را انجام دهد.")
         history = get_conversation_history(uid, limit=12)
         add_conversation_message(uid, "user", question)
         await m.answer("در حال بررسی سؤالت... ⏳")
-        answer = await asyncio.to_thread(ask, p, question, coach_id, history=history)
+        try:
+            answer = await asyncio.to_thread(ask, p, question, coach_id, history=history)
+        except Exception as exc:
+            print(f"Coach chat AI provider failure: {type(exc).__name__}: {exc}")
+            return await m.answer("سرویس هوش مصنوعی موقتاً در دسترس نیست؛ پیام تو ذخیره شد و می‌توانی دوباره تلاش کنی.")
         add_conversation_message(uid, "assistant", answer)
         await send_long_text(m, answer)
 
@@ -488,13 +520,7 @@ async def main():
     async def coach_athletes(m: Message):
         if not is_coach(m.from_user.id):
             return await m.answer("⛔ دسترسی غیرمجاز است.")
-        with db() as c:
-            rows = c.execute(
-                "SELECT a.telegram_id, a.username, a.first_name, a.last_name, "
-                "p.name, p.goal, p.updated_at "
-                "FROM accounts a LEFT JOIN athletes p ON p.telegram_id=a.telegram_id "
-                "WHERE a.role='athlete' ORDER BY a.updated_at DESC LIMIT 30"
-            ).fetchall()
+        rows = list_coach_athletes(m.from_user.id, limit=30)
         if not rows:
             return await m.answer("هنوز ورزشکاری در این ربات ثبت‌نام نکرده است.", reply_markup=coach_kb())
         lines = ["👥 فهرست ورزشکاران (حداکثر ۳۰ نفر):"]
@@ -571,7 +597,8 @@ async def main():
         except: return await m.answer("فرمت: /approve ID")
         x=get_program(pid)
         if not x or x["coach_id"]!=m.from_user.id: return await m.answer("درخواست پیدا نشد یا متعلق به شما نیست.")
-        review(pid,"approved")
+        if not review(pid,"approved",coach_id=m.from_user.id):
+            return await m.answer("این درخواست قبلاً بررسی شده یا دیگر در وضعیت انتظار نیست.")
         try:
             for chunk in split_telegram_text(f"✅ برنامه #{pid} توسط مربی تأیید شد:\\n{x['content']}"):
                 await bot.send_message(x["athlete_id"], chunk)
@@ -589,10 +616,24 @@ async def main():
         x=get_program(pid)
         if not x or x["coach_id"]!=m.from_user.id: return await m.answer("درخواست پیدا نشد.")
         note=parts[2] if len(parts)>2 else "نیازمند اصلاح"
-        review(pid,"rejected",note)
+        if not review(pid,"rejected",note,coach_id=m.from_user.id):
+            return await m.answer("این درخواست قبلاً بررسی شده یا دیگر در وضعیت انتظار نیست.")
         try: await bot.send_message(x["athlete_id"],f"برنامه #{pid} فعلاً تأیید نشد.\nتوضیح مربی: {note}")
         except: pass
         await m.answer("درخواست رد شد.")
+
+    @dp.message(Command("assign"))
+    async def assign_cmd(m: Message):
+        if m.from_user.id not in ADMIN_IDS:
+            return await m.answer("⛔ فقط مدیر می‌تواند مربی را به ورزشکار اختصاص دهد.")
+        parts = (m.text or "").split()
+        if len(parts) != 3:
+            return await m.answer("فرمت: /assign ATHLETE_TELEGRAM_ID COACH_TELEGRAM_ID")
+        try:
+            assign_athlete(int(parts[1]), int(parts[2]))
+        except (ValueError, TypeError) as exc:
+            return await m.answer(f"اتصال انجام نشد: {str(exc)[:180]}")
+        await m.answer(f"ورزشکار {parts[1]} به مربی {parts[2]} متصل شد.")
 
     @dp.message(Command("grant"))
     async def grant_cmd(m):
@@ -636,7 +677,8 @@ async def main():
             try:
                 file = await bot.get_file(video.file_id)
                 await bot.download_file(file.file_path, destination=inp)
-                metrics = await asyncio.to_thread(analyze_video, str(inp), str(out))
+                async with video_semaphore:
+                    metrics = await asyncio.to_thread(analyze_video, str(inp), str(out))
                 caption = (
                     "✅ نسخه تصویری تحلیل آماده شد.\n"
                     f"مدت: {metrics['duration']} ثانیه\n"

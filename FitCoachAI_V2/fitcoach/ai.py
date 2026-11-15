@@ -9,6 +9,11 @@ from fitcoach.db import search_knowledge
 
 logger = logging.getLogger(__name__)
 
+
+class AIServiceError(RuntimeError):
+    """Raised when the model provider fails; callers must not treat it as bad JSON."""
+
+
 SYSTEM = """
 تو FitCoach AI هستی؛ دستیار هوشمند تمرین و تغذیه زیر نظر مربی.
 همیشه فارسی روان، دقیق، کاربردی و ساختاریافته پاسخ بده؛ مگر اینکه کاربر زبان دیگری بخواهد.
@@ -109,6 +114,8 @@ def ask(
     medication = str(profile.get("medication") or "").strip()
 
     if not GROQ_API_KEY:
+        if output_format == "workout_json":
+            raise AIServiceError("کلید سرویس هوش مصنوعی تنظیم نشده است.")
         has_flags = bool(limitations and limitations.lower() not in ("خیر", "ندارد", "none", "no")) or (
             medication.lower() not in ("", "خیر", "ندارد", "no", "none")
         )
@@ -263,7 +270,6 @@ def ask(
 
     except Exception as error:
         logger.exception("Groq API request failed")
-        return (
-            f"خطا در سرویس هوش مصنوعی ({type(error).__name__}).\n"
-            "جزئیات فنی در Runtime Logs ثبت شده است؛ لطفاً کلید و نام مدل تنظیم‌شده را بررسی کن."
-        )
+        raise AIServiceError(
+            f"سرویس هوش مصنوعی در دسترس نیست ({type(error).__name__})."
+        ) from error

@@ -114,6 +114,13 @@ def init():
       reviewed_at TEXT, review_note TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS coach_athletes(
+      athlete_id INTEGER PRIMARY KEY,
+      coach_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS progress(
       id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER, entry TEXT, created_at TEXT
     );
@@ -175,6 +182,8 @@ def init():
       ON daily_checkins(athlete_id,created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_athlete_id
       ON conversations(athlete_id,id);
+    CREATE INDEX IF NOT EXISTS idx_coach_athletes_coach
+      ON coach_athletes(coach_id,athlete_id);
     """
 
     if _is_postgres():
@@ -429,6 +438,60 @@ def clear_conversation_history(uid):
 
 
 # ---------------------------------------------------------------------------
+# Explicit athlete-to-coach ownership
+# ---------------------------------------------------------------------------
+
+def assign_athlete(athlete_id, coach_id):
+    """Assign one athlete to an existing coach/admin; one owner per athlete."""
+    athlete_id, coach_id = int(athlete_id), int(coach_id)
+    with db() as c:
+        athlete = c.execute(
+            "SELECT role FROM accounts WHERE telegram_id=?", (athlete_id,)
+        ).fetchone()
+        coach = c.execute(
+            "SELECT role FROM accounts WHERE telegram_id=?", (coach_id,)
+        ).fetchone()
+        if not athlete or athlete["role"] != "athlete":
+            raise ValueError("athlete account not found")
+        if not coach or coach["role"] not in {"coach", "admin"}:
+            raise ValueError("coach account not found")
+        timestamp = now()
+        c.execute(
+            "INSERT INTO coach_athletes(athlete_id,coach_id,created_at,updated_at) "
+            "VALUES(?,?,?,?) ON CONFLICT(athlete_id) DO UPDATE SET "
+            "coach_id=excluded.coach_id,updated_at=excluded.updated_at",
+            (athlete_id, coach_id, timestamp, timestamp),
+        )
+    return True
+
+
+def athlete_coach(athlete_id):
+    with db() as c:
+        row = c.execute(
+            "SELECT coach_id FROM coach_athletes WHERE athlete_id=?",
+            (int(athlete_id),),
+        ).fetchone()
+        return int(row["coach_id"]) if row else None
+
+
+def list_coach_athletes(coach_id, limit=30):
+    limit = max(1, min(int(limit), 100))
+    with db() as c:
+        return [
+            dict(row) for row in c.execute(
+                "SELECT a.telegram_id,a.username,a.first_name,a.last_name,"
+                "p.name,p.goal,p.updated_at "
+                "FROM coach_athletes ca "
+                "JOIN accounts a ON a.telegram_id=ca.athlete_id "
+                "LEFT JOIN athletes p ON p.telegram_id=a.telegram_id "
+                "WHERE ca.coach_id=? AND a.role='athlete' "
+                "ORDER BY a.updated_at DESC LIMIT ?",
+                (int(coach_id), limit),
+            ).fetchall()
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Coach knowledge and programs
 # ---------------------------------------------------------------------------
 
@@ -466,6 +529,40 @@ def search_knowledge(coach_id, query, limit=7):
     return [item[1] for item in scored[:limit]]
 
 
+def create_program_with_quota(uid, coach_id, kind, request, content, status):
+    """Atomically charge one plan and persist its completed program."""
+    with db() as c:
+        if not FREE_MODE:
+            timestamp = datetime.now(timezone.utc)
+            access = c.execute(
+                "SELECT expires_at FROM access WHERE athlete_id=?", (int(uid),)
+            ).fetchone()
+            if not access:
+                return None, False, "برای ساخت برنامه، ابتدا دسترسی خریداری یا توسط مربی فعال شود."
+            try:
+                expiry = datetime.fromisoformat(access["expires_at"])
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                return None, False, "دسترسی فعال نیست."
+            if expiry < timestamp:
+                return None, False, "اشتراک پایان یافته است."
+            cursor = c.execute(
+                "UPDATE access SET plans_used=plans_used+1,updated_at=? "
+                "WHERE athlete_id=? AND expires_at=? AND plans_used < plans_limit",
+                (timestamp.isoformat(), int(uid), access["expires_at"]),
+            )
+            if cursor.rowcount != 1:
+                return None, False, "سقف برنامه‌های این دوره تمام شده است یا دسترسی تغییر کرده؛ دوباره تلاش کن."
+        row = c.execute(
+            "INSERT INTO programs"
+            "(athlete_id,coach_id,kind,request,content,status,created_at) "
+            "VALUES(?,?,?,?,?,?,?) RETURNING id",
+            (uid, coach_id, kind, request, content, status, now()),
+        ).fetchone()
+        return row["id"], True, "ok"
+
+
 def create_program(uid, coach_id, kind, request, content, status):
     with db() as c:
         row = c.execute(
@@ -495,12 +592,21 @@ def pending(coach_id):
         ]
 
 
-def review(pid, status, note=""):
+def review(pid, status, note="", coach_id=None):
+    """Transition a pending program once; optionally enforce its owning coach."""
+    if status not in {"approved", "rejected"}:
+        raise ValueError("invalid review status")
+    where = "id=? AND status='pending'"
+    params = [status, now(), str(note)[:1000], int(pid)]
+    if coach_id is not None:
+        where += " AND coach_id=?"
+        params.append(int(coach_id))
     with db() as c:
-        c.execute(
-            "UPDATE programs SET status=?,reviewed_at=?,review_note=? WHERE id=?",
-            (status, now(), note, pid),
+        cursor = c.execute(
+            "UPDATE programs SET status=?,reviewed_at=?,review_note=? WHERE " + where,
+            tuple(params),
         )
+        return cursor.rowcount == 1
 
 
 # ---------------------------------------------------------------------------
@@ -550,26 +656,57 @@ def grant(uid, days=SUBSCRIPTION_DAYS, limit=SUBSCRIPTION_PLAN_LIMIT, plan="subs
         )
 
 
-def consume_plan(uid):
+def check_plan_access(uid):
+    """Read-only preflight: reject ineligible requests before spending AI tokens."""
     if FREE_MODE:
         return True, "حالت رایگان آزمایشی فعال است."
-    access = access_info(uid)
-    if not access:
+    with db() as c:
+        row = c.execute(
+            "SELECT expires_at, plans_limit, plans_used FROM access WHERE athlete_id=?",
+            (uid,),
+        ).fetchone()
+    if not row:
         return False, "برای ساخت برنامه، ابتدا دسترسی خریداری یا توسط مربی فعال شود."
     try:
-        expiry = datetime.fromisoformat(access["expires_at"])
-    except Exception:
+        expiry = datetime.fromisoformat(row["expires_at"])
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
         return False, "دسترسی فعال نیست."
     if expiry < datetime.now(timezone.utc):
         return False, "اشتراک پایان یافته است. برنامه‌های قبلی همچنان قابل مشاهده‌اند."
-    if access["plans_used"] >= access["plans_limit"]:
+    if row["plans_used"] >= row["plans_limit"]:
         return False, "سقف برنامه‌های این دوره تمام شده است."
+    return True, "ok"
+
+
+def consume_plan(uid):
+    """Atomically consume one plan slot; safe under concurrent requests."""
+    if FREE_MODE:
+        return True, "حالت رایگان آزمایشی فعال است."
+    timestamp = datetime.now(timezone.utc)
     with db() as c:
-        c.execute(
+        row = c.execute(
+            "SELECT expires_at, plans_limit, plans_used FROM access WHERE athlete_id=?",
+            (uid,),
+        ).fetchone()
+        if not row:
+            return False, "برای ساخت برنامه، ابتدا دسترسی خریداری یا توسط مربی فعال شود."
+        try:
+            expiry = datetime.fromisoformat(row["expires_at"])
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return False, "دسترسی فعال نیست."
+        if expiry < timestamp:
+            return False, "اشتراک پایان یافته است. برنامه‌های قبلی همچنان قابل مشاهده‌اند."
+        cursor = c.execute(
             "UPDATE access SET plans_used=plans_used+1,updated_at=? "
-            "WHERE athlete_id=?",
-            (now(), uid),
+            "WHERE athlete_id=? AND expires_at=? AND plans_used < plans_limit",
+            (timestamp.isoformat(), uid, row["expires_at"]),
         )
+        if cursor.rowcount != 1:
+            return False, "سقف برنامه‌های این دوره تمام شده است یا دسترسی تغییر کرده؛ دوباره تلاش کن."
     return True, "ok"
 
 
@@ -651,7 +788,7 @@ def delete_athlete_data(uid):
         for table in (
             "athletes", "progress", "access", "programs", "conversations",
             "conversation_sessions", "workout_logs", "nutrition_logs",
-            "body_measurements", "daily_checkins",
+            "body_measurements", "daily_checkins", "coach_athletes",
         ):
             if table == "athletes":
                 c.execute("DELETE FROM athletes WHERE telegram_id=?", (uid,))
