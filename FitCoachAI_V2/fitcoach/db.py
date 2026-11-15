@@ -754,7 +754,7 @@ def delete_athlete_data(uid):
         for table in (
             "athletes", "progress", "access", "programs", "conversations",
             "conversation_sessions", "workout_logs", "nutrition_logs",
-            "body_measurements", "daily_checkins",
+            "body_measurements", "daily_checkins", "coach_athletes",
         ):
             if table == "athletes":
                 c.execute("DELETE FROM athletes WHERE telegram_id=?", (uid,))
