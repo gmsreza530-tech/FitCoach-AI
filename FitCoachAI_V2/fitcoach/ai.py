@@ -3,7 +3,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from groq import Groq
 
-from fitcoach.config import GROQ_API_KEY, GROQ_MODEL
+from fitcoach.config import GROQ_API_KEY, GROQ_MODEL, GROQ_VISION_MODEL
 from fitcoach.db import search_knowledge
 
 
@@ -98,9 +98,7 @@ def analyze_body_photo(image_bytes: bytes, mime_type: str, profile: Optional[Dic
         raise AIServiceError("فرمت تصویر باید JPEG، PNG یا WEBP باشد.")
 
     import base64
-    import os
-
-    vision_model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct").strip()
+    vision_model = GROQ_VISION_MODEL
     data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
     profile_context = _profile_to_text(profile or {})
     prompt = (
