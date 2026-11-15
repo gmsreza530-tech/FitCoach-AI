@@ -272,13 +272,14 @@ async def main():
             except Exception as exc:
                 print(f"AI provider failure: {type(exc).__name__}: {exc}")
                 return await m.answer("سرویس هوش مصنوعی موقتاً پاسخ نداد. هیچ سهمیه‌ای مصرف نشد؛ چند دقیقه بعد دوباره تلاش کن.")
-        # Consume quota only after a complete, validated answer exists.
-        ok, msg = consume_plan(m.from_user.id)
-        if not ok:
-            return await m.answer(msg + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
+        # Persist the completed plan and consume quota in one DB transaction.
         # Any quality warning or declared health constraint requires human review.
         status="pending" if (APPROVAL_MODE=="both" or (kind == "workout" and quality_warnings)) else "approved"
-        pid=create_program(m.from_user.id,coach_id,kind,question,answer,status)
+        pid, ok, msg = create_program_with_quota(
+            m.from_user.id, coach_id, kind, question, answer, status
+        )
+        if not ok:
+            return await m.answer(msg + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
         if status=="pending":
             await m.answer(f"درخواست برنامه ثبت شد و برای تأیید مربی ارسال شد. کد پیگیری: {pid}")
             if coach_id:
