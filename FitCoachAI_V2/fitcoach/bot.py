@@ -214,12 +214,20 @@ async def main():
             for attempt in range(2):
                 retry_question = question
                 if validation_error:
+                    expected_sessions = p.get("days")
+                    session_instruction = (
+                        f" تعداد جلسات مورد انتظار دقیقاً {expected_sessions} است؛ "
+                        f"weekly_schedule باید دقیقاً {expected_sessions} عضو داشته باشد و روز استراحت در آن نیاید."
+                        if expected_sessions not in (None, "")
+                        else " تعداد جلسات در پروفایل مشخص نیست؛ حدس نزن و سؤال تکمیلی بپرس."
+                    )
                     retry_question += (
                         "\n\nاصلاح اجباری خروجی قبلی: اعتبارسنجی برنامه این خطا را گزارش کرد: "
                         + validation_error
-                        + ". یک برنامه کامل و تازه تولید کن؛ فقط JSON معتبر مطابق ساختار خواسته‌شده، "
-                        "تعداد روزهای دقیقاً برابر پروفایل، و تمام فیلدهای اجباری هر حرکت. "
-                        "خروجی قبلی را ادامه نده و متن ناقص را تکرار نکن."
+                        + ". تمام پروفایل ورزشکار را دوباره مبنا قرار بده."
+                        + session_instruction
+                        + " یک برنامه کامل و تازه تولید کن؛ فقط JSON معتبر با تمام فیلدهای اجباری. "
+                        "خروجی قبلی را ادامه نده، تعداد جلسات را تغییر نده و متن ناقص را تکرار نکن."
                     )
 
                 raw_answer = await asyncio.to_thread(
