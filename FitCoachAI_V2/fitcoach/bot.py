@@ -209,7 +209,7 @@ async def main():
             )
         allowed, access_message = check_plan_access(m.from_user.id)
         if not allowed:
-            return await m.answer(access_message + "\\nبرای فعال‌سازی، با مربی تماس بگیر.")
+            return await m.answer(access_message + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
         coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
         if kind == "workout":
@@ -270,7 +270,7 @@ async def main():
         # Consume quota only after a complete, validated answer exists.
         ok, msg = consume_plan(m.from_user.id)
         if not ok:
-            return await m.answer(msg + "\\nبرای فعال‌سازی، با مربی تماس بگیر.")
+            return await m.answer(msg + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
         # Any quality warning or declared health constraint requires human review.
         status="pending" if (APPROVAL_MODE=="both" or (kind == "workout" and quality_warnings)) else "approved"
         pid=create_program(m.from_user.id,coach_id,kind,question,answer,status)
