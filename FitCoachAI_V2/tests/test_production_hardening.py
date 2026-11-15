@@ -37,6 +37,21 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertTrue(allowed)
         self.assertEqual(database.access_info(1001)["plans_used"], 0)
 
+    def test_program_and_quota_are_committed_together(self):
+        database.grant(1001, days=30, limit=1)
+        program_id, ok, _ = database.create_program_with_quota(
+            1001, 2002, "workout", "request", "complete plan", "approved"
+        )
+        self.assertTrue(ok)
+        self.assertIsNotNone(program_id)
+        self.assertEqual(database.access_info(1001)["plans_used"], 1)
+        second_id, second_ok, _ = database.create_program_with_quota(
+            1001, 2002, "workout", "request", "another plan", "approved"
+        )
+        self.assertFalse(second_ok)
+        self.assertIsNone(second_id)
+        self.assertEqual(database.access_info(1001)["plans_used"], 1)
+
     def test_quota_consumption_is_bounded(self):
         database.grant(1001, days=30, limit=1)
         self.assertTrue(database.consume_plan(1001)[0])
