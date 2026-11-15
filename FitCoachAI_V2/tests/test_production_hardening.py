@@ -74,6 +74,31 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertEqual([row["telegram_id"] for row in database.list_coach_athletes(2002)], [1001])
         self.assertEqual(database.list_coach_athletes(3003), [])
 
+    def test_body_photo_reference_and_analysis_are_attached_to_athlete(self):
+        photo_id = database.save_body_photo(
+            1001, "telegram-file-id", "front",
+            "توصیف ظاهری محدود؛ غیرتشخیصی", database.now()
+        )
+        self.assertGreater(photo_id, 0)
+        assessment = database.latest_body_assessment(1001)
+        self.assertIn("front", assessment)
+        self.assertIn("غیرتشخیصی", assessment)
+        self.assertNotIn("telegram-file-id", assessment)
+
+    def test_extended_measurements_are_saved_and_included_in_assessment(self):
+        database.add_extended_measurements(
+            1001, hip=96.0, shoulder=112.0, forearm=27.0, calf=36.0, neck=38.0
+        )
+        assessment = database.latest_body_assessment(1001)
+        self.assertIn("دور باسن: 96.0", assessment)
+        self.assertIn("دور ساق: 36.0", assessment)
+
+    def test_athlete_data_deletion_removes_photo_and_measurement_records(self):
+        database.save_body_photo(1001, "file-id", "side", "summary", database.now())
+        database.add_extended_measurements(1001, hip=95.0)
+        database.delete_athlete_data(1001)
+        self.assertEqual(database.latest_body_assessment(1001), "")
+
     def test_review_is_pending_only_and_coach_scoped(self):
         program_id = database.create_program(
             1001, 2002, "workout", "request", "content", "pending"

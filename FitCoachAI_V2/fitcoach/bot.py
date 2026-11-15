@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from fitcoach.config import BOT_TOKEN,COACH_IDS,ADMIN_IDS,APPROVAL_MODE,UPLOAD_DIR,SUBSCRIPTION_DAYS,SUBSCRIPTION_PLAN_LIMIT,FREE_MODE
 from fitcoach.db import *
-from fitcoach.ai import ask
+from fitcoach.ai import ask, analyze_body_photo
 from fitcoach.program_formatter import format_workout_plan, validate_workout_plan, WorkoutFormatError, _profile_days
 from fitcoach.excel_import import import_excel
 from fitcoach.video_analysis import analyze_video
@@ -24,6 +24,8 @@ class NutritionForm(StatesGroup): meal=State(); calories=State(); protein=State(
 class MeasurementForm(StatesGroup): weight=State(); waist=State(); chest=State(); arm=State(); thigh=State()
 class CheckinForm(StatesGroup): sleep=State(); energy=State(); soreness=State(); adherence=State(); notes=State()
 class DeleteForm(StatesGroup): confirm=State()
+class BodyPhotoForm(StatesGroup): consent=State(); view=State(); photo=State()
+class ExtendedMeasurementForm(StatesGroup): hip=State(); shoulder=State(); forearm=State(); calf=State(); neck=State()
 
 def split_telegram_text(text, limit=3900):
     """Split long plain-text replies without dropping content."""
@@ -65,7 +67,8 @@ def kb(show_coach_entry=False):
       [KeyboardButton(text="🎥 تحلیل فرم حرکت"),KeyboardButton(text="📚 برنامه‌های قبلی")],
       [KeyboardButton(text="🏃 ثبت تمرین"),KeyboardButton(text="🍽 ثبت غذا")],
       [KeyboardButton(text="⚖️ اندازه‌گیری بدن"),KeyboardButton(text="🛌 چک‌این روزانه")],
-      [KeyboardButton(text="📊 گزارش من"),KeyboardButton(text="ℹ️ راهنما")]
+      [KeyboardButton(text="📊 گزارش من"),KeyboardButton(text="ℹ️ راهنما")],
+      [KeyboardButton(text="📸 پرونده تصویری"),KeyboardButton(text="📏 اندازه‌های تکمیلی")]
     ]
     if show_coach_entry:
         keyboard.append([KeyboardButton(text="🧑‍🏫 بازگشت به پنل مربی")])
@@ -211,6 +214,9 @@ async def main():
     async def generate(m,kind,question):
         p=profile(m.from_user.id)
         if not p: return await m.answer("ابتدا پروفایل را تکمیل کن.")
+        visual_assessment = latest_body_assessment(m.from_user.id)
+        if visual_assessment:
+            p["visual_assessment"] = visual_assessment
         if kind == "workout" and _profile_days(p) is None:
             return await m.answer(
                 "برای ساخت برنامه دقیق، تعداد جلسات تمرین در هفته در پروفایلت مشخص یا معتبر نیست. "
@@ -312,6 +318,9 @@ async def main():
         coach_id = athlete_coach(uid)
         if coach_id is None:
             return await m.answer("هنوز مربی به حساب تو اختصاص داده نشده است. مدیر باید اتصال مربی را انجام دهد.")
+        visual_assessment = latest_body_assessment(uid)
+        if visual_assessment:
+            p["visual_assessment"] = visual_assessment
         history = get_conversation_history(uid, limit=12)
         add_conversation_message(uid, "user", question)
         await m.answer("در حال بررسی سؤالت... ⏳")
@@ -650,6 +659,135 @@ async def main():
         if m.from_user.id not in ADMIN_IDS: return
         a,p,k=stats(); await m.answer(f"آمار\nورزشکاران: {a}\nبرنامه‌ها: {p}\nردیف دانش مربی: {k}")
 
+    # Athlete photo record: explicit consent, temporary local processing, no raw image storage.
+    @dp.message(F.text == "📸 پرونده تصویری")
+    async def body_photo_start(m: Message, state: FSMContext):
+        if not profile(m.from_user.id):
+            return await m.answer("ابتدا پروفایل ورزشی را تکمیل کن.")
+        await state.clear()
+        await state.set_state(BodyPhotoForm.consent)
+        await m.answer(
+            "📸 پرونده تصویری بدن\n"
+            "با ارسال عکس موافقت می‌کنی تصویر برای تحلیل غیرتشخیصی به سرویس هوش مصنوعی Groq ارسال شود؟\n"
+            "تصویر فقط موقتاً روی سرور دریافت می‌شود؛ فایل خام در پایگاه داده ذخیره نمی‌شود. "
+            "شناسه فایل تلگرام و خلاصه تحلیل در پرونده ورزشی ثبت می‌شوند. این فرایند نسخه عکس موجود در گفت‌وگوی تلگرام را حذف نمی‌کند.\n"
+            "برای ادامه دقیقاً بنویس: موافقم"
+        )
+
+    @dp.message(BodyPhotoForm.consent, F.text)
+    async def body_photo_consent(m: Message, state: FSMContext):
+        if (m.text or "").strip() != "موافقم":
+            await state.clear()
+            return await m.answer("فرایند ثبت عکس لغو شد. هر زمان خواستی دوباره شروع کن.")
+        await state.set_state(BodyPhotoForm.view)
+        await m.answer("زاویه عکس را مشخص کن: روبه‌رو / نیم‌رخ / پشت")
+
+    @dp.message(BodyPhotoForm.view, F.text)
+    async def body_photo_view(m: Message, state: FSMContext):
+        raw = (m.text or "").strip()
+        views = {"روبه‌رو": "front", "نیم‌رخ": "side", "پشت": "back"}
+        if raw not in views:
+            return await m.answer("یکی از این سه مورد را بفرست: روبه‌رو، نیم‌رخ یا پشت")
+        await state.update_data(view_type=views[raw])
+        await state.set_state(BodyPhotoForm.photo)
+        await m.answer("حالا عکس واضح و با نور مناسب را به‌صورت Photo ارسال کن. عکس باید متعلق به خودت باشد.")
+
+    @dp.message(BodyPhotoForm.photo, F.photo)
+    async def body_photo_receive(m: Message, state: FSMContext):
+        data = await state.get_data()
+        await m.answer("عکس دریافت شد؛ در حال تحلیل غیرتشخیصی... ⏳")
+        photo = m.photo[-1]
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "athlete_photo.jpg"
+                telegram_file = await bot.get_file(photo.file_id)
+                await bot.download_file(telegram_file.file_path, destination=path)
+                image_bytes = path.read_bytes()
+                analysis = await asyncio.to_thread(
+                    analyze_body_photo, image_bytes, "image/jpeg", profile(m.from_user.id)
+                )
+            photo_id = save_body_photo(
+                m.from_user.id, photo.file_id, data["view_type"], analysis, now()
+            )
+            await state.clear()
+            await send_long_text(
+                m,
+                f"✅ عکس با شناسه پرونده {photo_id} ثبت شد.\n"
+                "فایل خام پس از پایان پردازش از فضای موقت حذف شد.\n\n"
+                f"خلاصه تحلیل غیرتشخیصی:\n{analysis}\n\n"
+                "این خلاصه در تولید برنامه‌های بعدی در کنار پروفایل و اندازه‌های واقعی لحاظ می‌شود."
+            )
+        except Exception as exc:
+            await state.clear()
+            print(f"Body photo processing failed: {type(exc).__name__}: {exc}")
+            await m.answer(
+                "تحلیل عکس انجام نشد و تصویری در پرونده ثبت نشد. "
+                "کمی بعد دوباره تلاش کن یا از زاویه و نور مناسب‌تری عکس بفرست."
+            )
+
+    @dp.message(BodyPhotoForm.photo)
+    async def body_photo_expect_image(m: Message):
+        await m.answer("لطفاً عکس را به‌صورت Photo ارسال کن؛ ارسال فایل یا متن در این مرحله پشتیبانی نمی‌شود.")
+
+    @dp.message(F.text == "📏 اندازه‌های تکمیلی")
+    async def extended_measure_start(m: Message, state: FSMContext):
+        if not profile(m.from_user.id):
+            return await m.answer("ابتدا پروفایل ورزشی را تکمیل کن.")
+        await state.clear()
+        await state.set_state(ExtendedMeasurementForm.hip)
+        await m.answer("اندازه‌های تکمیلی بر حسب سانتی‌متر. دور باسن؟ عدد وارد کن یا «ندارم».")
+
+    async def save_optional_extended(m, state, key, next_state, prompt, low, high):
+        raw = (m.text or "").strip()
+        if raw in ("-", "ندارم", "خالی"):
+            value = None
+        else:
+            try:
+                value = float(raw.replace(",", "."))
+                if not low <= value <= high:
+                    raise ValueError()
+            except (ValueError, TypeError):
+                return await m.answer(f"عدد معتبر بین {low} تا {high} یا «ندارم» وارد کن.")
+        await state.update_data(**{key: value})
+        await state.set_state(next_state)
+        await m.answer(prompt)
+
+    @dp.message(ExtendedMeasurementForm.hip)
+    async def em1(m: Message, state: FSMContext):
+        await save_optional_extended(m, state, "hip", ExtendedMeasurementForm.shoulder,
+                                     "دور سرشانه؟ یا «ندارم»", 30, 200)
+    @dp.message(ExtendedMeasurementForm.shoulder)
+    async def em2(m: Message, state: FSMContext):
+        await save_optional_extended(m, state, "shoulder", ExtendedMeasurementForm.forearm,
+                                     "دور ساعد؟ یا «ندارم»", 10, 70)
+    @dp.message(ExtendedMeasurementForm.forearm)
+    async def em3(m: Message, state: FSMContext):
+        await save_optional_extended(m, state, "forearm", ExtendedMeasurementForm.calf,
+                                     "دور ساق؟ یا «ندارم»", 15, 100)
+    @dp.message(ExtendedMeasurementForm.calf)
+    async def em4(m: Message, state: FSMContext):
+        await save_optional_extended(m, state, "calf", ExtendedMeasurementForm.neck,
+                                     "دور گردن؟ یا «ندارم»", 15, 80)
+    @dp.message(ExtendedMeasurementForm.neck)
+    async def em5(m: Message, state: FSMContext):
+        raw = (m.text or "").strip()
+        if raw in ("-", "ندارم", "خالی"):
+            value = None
+        else:
+            try:
+                value = float(raw.replace(",", "."))
+                if not 15 <= value <= 80:
+                    raise ValueError()
+            except (ValueError, TypeError):
+                return await m.answer("عدد معتبر بین ۱۵ تا ۸۰ یا «ندارم» وارد کن.")
+        data = await state.get_data()
+        add_extended_measurements(
+            m.from_user.id, hip=data.get("hip"), shoulder=data.get("shoulder"),
+            forearm=data.get("forearm"), calf=data.get("calf"), neck=value
+        )
+        await state.clear()
+        await m.answer("✅ اندازه‌های تکمیلی در پرونده ورزشی ثبت شدند.")
+
     @dp.message(F.text=="🎥 تحلیل فرم حرکت")
     async def video_help(m):
         await m.answer(
@@ -697,7 +835,7 @@ async def main():
 
     @dp.message(F.photo)
     async def photo(m):
-        await m.answer("عکس دریافت شد. در نسخه فعلی تحلیل فرم از روی ویدئو انجام می‌شود؛ عکس ثابت برای ارزیابی حرکت کافی نیست. برای ارزیابی آسیب یا تشخیص پزشکی به متخصص مراجعه کن.")
+        await m.answer("برای ثبت عکس در پرونده، ابتدا دکمه «📸 پرونده تصویری» را بزن و رضایت و زاویه عکس را مشخص کن.")
 
     @dp.message(F.text=="ℹ️ راهنما")
     async def help_msg(m):

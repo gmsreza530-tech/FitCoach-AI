@@ -22,3 +22,5 @@ UPLOAD_DIR = Path("uploads")
 MAX_EXCEL_BYTES = 8 * 1024 * 1024
 
 FREE_MODE = os.getenv("FREE_MODE", "true").lower() == "true"
+
+GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b").strip()

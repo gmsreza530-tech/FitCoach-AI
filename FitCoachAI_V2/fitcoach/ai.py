@@ -3,7 +3,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from groq import Groq
 
-from fitcoach.config import GROQ_API_KEY, GROQ_MODEL
+from fitcoach.config import GROQ_API_KEY, GROQ_MODEL, GROQ_VISION_MODEL
 from fitcoach.db import search_knowledge
 
 
@@ -56,6 +56,7 @@ def _profile_to_text(profile: Optional[Dict[str, Any]]) -> str:
         "limitations": "آسیب‌ها و محدودیت‌ها",
         "medication": "دارو",
         "notes": "توضیحات تکمیلی",
+        "visual_assessment": "خلاصه تحلیل تصویری غیرتشخیصی",
     }
 
     lines = []
@@ -83,6 +84,55 @@ def _normalize_history(history: Optional[Iterable[Dict[str, Any]]]) -> List[Dict
         if content:
             normalized.append({"role": role, "content": content[:6000]})
     return normalized
+
+
+
+
+def analyze_body_photo(image_bytes: bytes, mime_type: str, profile: Optional[Dict[str, Any]] = None) -> str:
+    """Produce a cautious, non-diagnostic visual summary from a temporary image payload."""
+    if not GROQ_API_KEY:
+        raise AIServiceError("کلید سرویس هوش مصنوعی تنظیم نشده است.")
+    if not image_bytes or len(image_bytes) > 8 * 1024 * 1024:
+        raise AIServiceError("حجم تصویر نامعتبر است؛ حداکثر ۸ مگابایت مجاز است.")
+    if mime_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise AIServiceError("فرمت تصویر باید JPEG، PNG یا WEBP باشد.")
+
+    import base64
+    vision_model = GROQ_VISION_MODEL
+    data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    profile_context = _profile_to_text(profile or {})
+    prompt = (
+        "این تصویر برای پرونده ورزشی فرد و با رضایت او ارسال شده است. "
+        "فقط ویژگی‌های قابل مشاهده و مرتبط با تمرین را به زبان فارسی، کوتاه و خنثی توصیف کن. "
+        "اگر زاویه، نور، پوشش یا کیفیت برای ارزیابی مناسب نیست، صریح بگو. "
+        "از تشخیص پزشکی، تخمین قطعی درصد چربی، وزن، اندازه دور بدن، سن، هویت، بیماری، "
+        "آسیب مفصل یا نتیجه‌گیری درباره سلامت خودداری کن. "
+        "از قضاوت ارزشی درباره ظاهر بدن خودداری کن. "
+        "در صورت امکان فقط درباره وضعیت کلی قابل مشاهده، تقارن ظاهری قابل مشاهده و محدودیت‌های تصویر توضیح بده. "
+        "این تحلیل به تنهایی مبنای تجویز تمرین یا تشخیص عدم تقارن بالینی نیست. "
+        f"اطلاعات ورزشی اعلام‌شده (صرفاً زمینه): {profile_context}"
+    )
+    try:
+        response = Groq(api_key=GROQ_API_KEY).chat.completions.create(
+            model=vision_model,
+            temperature=0.2,
+            max_tokens=700,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }],
+        )
+        if not response.choices or not response.choices[0].message.content:
+            raise RuntimeError("empty vision response")
+        return response.choices[0].message.content.strip()[:10000]
+    except Exception as error:
+        logger.exception("Groq vision analysis failed")
+        raise AIServiceError(
+            f"تحلیل تصویر در سرویس هوش مصنوعی ناموفق بود ({type(error).__name__})."
+        ) from error
 
 
 def ask(
