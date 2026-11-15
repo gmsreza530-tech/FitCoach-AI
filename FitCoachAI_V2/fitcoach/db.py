@@ -114,6 +114,13 @@ def init():
       reviewed_at TEXT, review_note TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS coach_athletes(
+      athlete_id INTEGER PRIMARY KEY,
+      coach_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS progress(
       id INTEGER PRIMARY KEY AUTOINCREMENT, athlete_id INTEGER, entry TEXT, created_at TEXT
     );
@@ -175,6 +182,8 @@ def init():
       ON daily_checkins(athlete_id,created_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_athlete_id
       ON conversations(athlete_id,id);
+    CREATE INDEX IF NOT EXISTS idx_coach_athletes_coach
+      ON coach_athletes(coach_id,athlete_id);
     """
 
     if _is_postgres():
@@ -426,6 +435,60 @@ def clear_conversation_history(uid):
     """Delete chat messages for this athlete; does not change profile or other records."""
     with db() as c:
         c.execute("DELETE FROM conversations WHERE athlete_id=?", (uid,))
+
+
+# ---------------------------------------------------------------------------
+# Explicit athlete-to-coach ownership
+# ---------------------------------------------------------------------------
+
+def assign_athlete(athlete_id, coach_id):
+    """Assign one athlete to an existing coach/admin; one owner per athlete."""
+    athlete_id, coach_id = int(athlete_id), int(coach_id)
+    with db() as c:
+        athlete = c.execute(
+            "SELECT role FROM accounts WHERE telegram_id=?", (athlete_id,)
+        ).fetchone()
+        coach = c.execute(
+            "SELECT role FROM accounts WHERE telegram_id=?", (coach_id,)
+        ).fetchone()
+        if not athlete or athlete["role"] != "athlete":
+            raise ValueError("athlete account not found")
+        if not coach or coach["role"] not in {"coach", "admin"}:
+            raise ValueError("coach account not found")
+        timestamp = now()
+        c.execute(
+            "INSERT INTO coach_athletes(athlete_id,coach_id,created_at,updated_at) "
+            "VALUES(?,?,?,?) ON CONFLICT(athlete_id) DO UPDATE SET "
+            "coach_id=excluded.coach_id,updated_at=excluded.updated_at",
+            (athlete_id, coach_id, timestamp, timestamp),
+        )
+    return True
+
+
+def athlete_coach(athlete_id):
+    with db() as c:
+        row = c.execute(
+            "SELECT coach_id FROM coach_athletes WHERE athlete_id=?",
+            (int(athlete_id),),
+        ).fetchone()
+        return int(row["coach_id"]) if row else None
+
+
+def list_coach_athletes(coach_id, limit=30):
+    limit = max(1, min(int(limit), 100))
+    with db() as c:
+        return [
+            dict(row) for row in c.execute(
+                "SELECT a.telegram_id,a.username,a.first_name,a.last_name,"
+                "p.name,p.goal,p.updated_at "
+                "FROM coach_athletes ca "
+                "JOIN accounts a ON a.telegram_id=ca.athlete_id "
+                "LEFT JOIN athletes p ON p.telegram_id=a.telegram_id "
+                "WHERE ca.coach_id=? AND a.role='athlete' "
+                "ORDER BY a.updated_at DESC LIMIT ?",
+                (int(coach_id), limit),
+            ).fetchall()
+        ]
 
 
 # ---------------------------------------------------------------------------
