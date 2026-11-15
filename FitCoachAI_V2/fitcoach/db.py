@@ -529,6 +529,40 @@ def search_knowledge(coach_id, query, limit=7):
     return [item[1] for item in scored[:limit]]
 
 
+def create_program_with_quota(uid, coach_id, kind, request, content, status):
+    """Atomically charge one plan and persist its completed program."""
+    with db() as c:
+        if not FREE_MODE:
+            timestamp = datetime.now(timezone.utc)
+            access = c.execute(
+                "SELECT expires_at FROM access WHERE athlete_id=?", (int(uid),)
+            ).fetchone()
+            if not access:
+                return None, False, "برای ساخت برنامه، ابتدا دسترسی خریداری یا توسط مربی فعال شود."
+            try:
+                expiry = datetime.fromisoformat(access["expires_at"])
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                return None, False, "دسترسی فعال نیست."
+            if expiry < timestamp:
+                return None, False, "اشتراک پایان یافته است."
+            cursor = c.execute(
+                "UPDATE access SET plans_used=plans_used+1,updated_at=? "
+                "WHERE athlete_id=? AND expires_at=? AND plans_used < plans_limit",
+                (timestamp.isoformat(), int(uid), access["expires_at"]),
+            )
+            if cursor.rowcount != 1:
+                return None, False, "سقف برنامه‌های این دوره تمام شده است یا دسترسی تغییر کرده؛ دوباره تلاش کن."
+        row = c.execute(
+            "INSERT INTO programs"
+            "(athlete_id,coach_id,kind,request,content,status,created_at) "
+            "VALUES(?,?,?,?,?,?,?) RETURNING id",
+            (uid, coach_id, kind, request, content, status, now()),
+        ).fetchone()
+        return row["id"], True, "ok"
+
+
 def create_program(uid, coach_id, kind, request, content, status):
     with db() as c:
         row = c.execute(
