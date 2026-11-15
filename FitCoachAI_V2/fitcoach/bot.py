@@ -93,7 +93,11 @@ async def main():
         register_account(m.from_user, role=role)
         # Safe automatic assignment only when exactly one coach is configured.
         if role == "athlete" and len(COACH_IDS) == 1 and athlete_coach(uid) is None:
-            assign_athlete(uid, next(iter(COACH_IDS)))
+            configured_coach_id = next(iter(COACH_IDS))
+            # The coach must have opened the bot once so their account role exists.
+            coach_account = account_info(configured_coach_id)
+            if coach_account and coach_account.get("role") == "coach":
+                assign_athlete(uid, configured_coach_id)
         if is_coach(uid):
             await m.answer(
                 "به FitCoach AI خوش آمدی. 🧑‍🏫\n"
