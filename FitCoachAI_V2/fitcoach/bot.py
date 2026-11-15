@@ -207,8 +207,6 @@ async def main():
                 "از بخش «تکمیل پروفایل» تعداد جلسات را بین ۱ تا ۷ ثبت کن؛ "
                 "تا آن زمان هیچ درخواست AI یا سهمیه برنامه مصرف نمی‌شود."
             )
-        ok,msg=consume_plan(m.from_user.id)
-        if not ok: return await m.answer(msg+"\nبرای فعال‌سازی، با مربی تماس بگیر.")
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
         coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
         if kind == "workout":
@@ -236,9 +234,13 @@ async def main():
                         "خروجی قبلی را ادامه نده، تعداد جلسات را تغییر نده و متن ناقص را تکرار نکن."
                     )
 
-                raw_answer = await asyncio.to_thread(
-                    ask, p, retry_question, coach_id, output_format="workout_json"
-                )
+                try:
+                    raw_answer = await asyncio.to_thread(
+                        ask, p, retry_question, coach_id, output_format="workout_json"
+                    )
+                except Exception as exc:
+                    print(f"Workout AI provider failure: {type(exc).__name__}: {exc}")
+                    return await m.answer("سرویس هوش مصنوعی موقتاً پاسخ نداد. هیچ سهمیه‌ای مصرف نشد؛ چند دقیقه بعد دوباره تلاش کن.")
                 try:
                     quality_warnings = validate_workout_plan(raw_answer, p)
                     answer = format_workout_plan(raw_answer, p)
@@ -257,7 +259,15 @@ async def main():
                     "لطفاً دوباره تلاش کن؛ اگر تکرار شد، گزارش خطای Runtime Logs را برای بررسی بفرست."
                 )
         else:
-            answer=await asyncio.to_thread(ask,p,question,coach_id)
+            try:
+                answer=await asyncio.to_thread(ask,p,question,coach_id)
+            except Exception as exc:
+                print(f"AI provider failure: {type(exc).__name__}: {exc}")
+                return await m.answer("سرویس هوش مصنوعی موقتاً پاسخ نداد. هیچ سهمیه‌ای مصرف نشد؛ چند دقیقه بعد دوباره تلاش کن.")
+        # Consume quota only after a complete, validated answer exists.
+        ok, msg = consume_plan(m.from_user.id)
+        if not ok:
+            return await m.answer(msg + "\\nبرای فعال‌سازی، با مربی تماس بگیر.")
         # Any quality warning or declared health constraint requires human review.
         status="pending" if (APPROVAL_MODE=="both" or (kind == "workout" and quality_warnings)) else "approved"
         pid=create_program(m.from_user.id,coach_id,kind,question,answer,status)
@@ -287,7 +297,11 @@ async def main():
         history = get_conversation_history(uid, limit=12)
         add_conversation_message(uid, "user", question)
         await m.answer("در حال بررسی سؤالت... ⏳")
-        answer = await asyncio.to_thread(ask, p, question, coach_id, history=history)
+        try:
+            answer = await asyncio.to_thread(ask, p, question, coach_id, history=history)
+        except Exception as exc:
+            print(f"Coach chat AI provider failure: {type(exc).__name__}: {exc}")
+            return await m.answer("سرویس هوش مصنوعی موقتاً در دسترس نیست؛ پیام تو ذخیره شد و می‌توانی دوباره تلاش کنی.")
         add_conversation_message(uid, "assistant", answer)
         await send_long_text(m, answer)
 
@@ -571,7 +585,8 @@ async def main():
         except: return await m.answer("فرمت: /approve ID")
         x=get_program(pid)
         if not x or x["coach_id"]!=m.from_user.id: return await m.answer("درخواست پیدا نشد یا متعلق به شما نیست.")
-        review(pid,"approved")
+        if not review(pid,"approved",coach_id=m.from_user.id):
+            return await m.answer("این درخواست قبلاً بررسی شده یا دیگر در وضعیت انتظار نیست.")
         try:
             for chunk in split_telegram_text(f"✅ برنامه #{pid} توسط مربی تأیید شد:\\n{x['content']}"):
                 await bot.send_message(x["athlete_id"], chunk)
@@ -589,7 +604,8 @@ async def main():
         x=get_program(pid)
         if not x or x["coach_id"]!=m.from_user.id: return await m.answer("درخواست پیدا نشد.")
         note=parts[2] if len(parts)>2 else "نیازمند اصلاح"
-        review(pid,"rejected",note)
+        if not review(pid,"rejected",note,coach_id=m.from_user.id):
+            return await m.answer("این درخواست قبلاً بررسی شده یا دیگر در وضعیت انتظار نیست.")
         try: await bot.send_message(x["athlete_id"],f"برنامه #{pid} فعلاً تأیید نشد.\nتوضیح مربی: {note}")
         except: pass
         await m.answer("درخواست رد شد.")
