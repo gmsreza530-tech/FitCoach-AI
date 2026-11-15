@@ -207,6 +207,9 @@ async def main():
                 "از بخش «تکمیل پروفایل» تعداد جلسات را بین ۱ تا ۷ ثبت کن؛ "
                 "تا آن زمان هیچ درخواست AI یا سهمیه برنامه مصرف نمی‌شود."
             )
+        allowed, access_message = check_plan_access(m.from_user.id)
+        if not allowed:
+            return await m.answer(access_message + "\\nبرای فعال‌سازی، با مربی تماس بگیر.")
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
         coach_id=next(iter(COACH_IDS),next(iter(ADMIN_IDS),0))
         if kind == "workout":
