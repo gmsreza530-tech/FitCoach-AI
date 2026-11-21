@@ -223,10 +223,15 @@ async def main():
                 "از بخش «تکمیل پروفایل» تعداد جلسات را بین ۱ تا ۷ ثبت کن؛ "
                 "تا آن زمان هیچ درخواست AI یا سهمیه برنامه مصرف نمی‌شود."
             )
-        allowed, access_message = check_plan_access(m.from_user.id)
-        if not allowed:
-            return await m.answer(access_message + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
-        coach_id = athlete_coach(m.from_user.id)
+        uid = m.from_user.id
+        staff_mode = is_coach(uid)
+        # Coaches and admins can use the athlete experience for their own account.
+        # Their own ID scopes knowledge and program ownership; athletes still need assignment.
+        if not staff_mode:
+            allowed, access_message = check_plan_access(uid)
+            if not allowed:
+                return await m.answer(access_message + "\nبرای فعال‌سازی، با مربی تماس بگیر.")
+        coach_id = uid if staff_mode else athlete_coach(uid)
         if coach_id is None:
             return await m.answer("هنوز مربی به حساب تو اختصاص داده نشده است. مدیر باید با دستور /assign شناسه_ورزشکار شناسه_مربی این اتصال را انجام دهد.")
         await m.answer("در حال ساخت پاسخ بر اساس پروفایل و فایل‌های دانش مربی... ⏳")
@@ -287,7 +292,11 @@ async def main():
                 return await m.answer("سرویس هوش مصنوعی موقتاً پاسخ نداد. هیچ سهمیه‌ای مصرف نشد؛ چند دقیقه بعد دوباره تلاش کن.")
         # Persist the completed plan and consume quota in one DB transaction.
         # Any quality warning or declared health constraint requires human review.
-        status="pending" if (APPROVAL_MODE=="both" or (kind == "workout" and quality_warnings)) else "approved"
+        # Staff are generating a personal plan, not submitting work for their own approval.
+        status = "approved" if staff_mode else (
+            "pending" if (APPROVAL_MODE == "both" or (kind == "workout" and quality_warnings))
+            else "approved"
+        )
         pid, ok, msg = create_program_with_quota(
             m.from_user.id, coach_id, kind, question, answer, status
         )
