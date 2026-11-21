@@ -324,7 +324,9 @@ async def main():
         if not question:
             return await m.answer("لطفاً پیام متنی بفرست.")
         question = question[:12000]
-        coach_id = athlete_coach(uid)
+        # Staff accounts use their own coach scope for personal AI chat;
+        # regular athletes must have an assigned coach.
+        coach_id = uid if is_coach(uid) else athlete_coach(uid)
         if coach_id is None:
             return await m.answer("هنوز مربی به حساب تو اختصاص داده نشده است. مدیر باید اتصال مربی را انجام دهد.")
         visual_assessment = latest_body_assessment(uid)
