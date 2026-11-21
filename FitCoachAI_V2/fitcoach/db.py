@@ -805,6 +805,116 @@ def recent_rows(table, uid, limit=30):
 
 
 
+
+def build_athlete_training_context(uid):
+    """Build a compact, evidence-based snapshot of recent athlete activity for the AI."""
+    workouts = recent_rows("workout_logs", uid, 20)
+    meals = recent_rows("nutrition_logs", uid, 14)
+    measurements = recent_rows("body_measurements", uid, 5)
+    checkins = recent_rows("daily_checkins", uid, 7)
+    progress = get_progress(uid)
+
+    lines = [
+        "این بخش از سوابق ثبت‌شده واقعی ورزشکار ساخته شده است؛ داده ثبت‌نشده را حدس نزن.",
+        "ثبت غذا ممکن است ناقص باشد و لزوماً نماینده کل دریافت روزانه نیست."
+    ]
+
+    if workouts:
+        lines.append("\nتمرین‌های ثبت‌شده اخیر (جدیدترین ابتدا):")
+        for row in workouts[:12]:
+            lines.append(
+                "- {date}: {exercise} | ست: {sets} | تکرار: {reps} | "
+                "وزنه: {weight} کیلوگرم | RIR: {rir} | یادداشت: {notes}".format(
+                    date=row.get("created_at") or "زمان نامشخص",
+                    exercise=row.get("exercise") or "حرکت نامشخص",
+                    sets=row.get("sets") if row.get("sets") is not None else "نامشخص",
+                    reps=row.get("reps") or "نامشخص",
+                    weight=row.get("weight") if row.get("weight") is not None else "نامشخص",
+                    rir=row.get("rir") if row.get("rir") is not None else "نامشخص",
+                    notes=(row.get("notes") or "ندارد")[:180],
+                )
+            )
+    else:
+        lines.append("\nتمرین ثبت‌شده‌ای در دسترس نیست؛ درباره عملکرد گذشته نتیجه‌گیری نکن.")
+
+    if meals:
+        logged_calories = sum(float(row.get("calories") or 0) for row in meals)
+        logged_protein = sum(float(row.get("protein") or 0) for row in meals)
+        lines.append(
+            "\nتغذیه: {count} وعده اخیر ثبت شده؛ مجموع صرفاً همین ورودی‌ها: "
+            "{calories:.0f} کیلوکالری و {protein:.1f} گرم پروتئین. "
+            "این اعداد را دریافت کامل روزانه تلقی نکن.".format(
+                count=len(meals), calories=logged_calories, protein=logged_protein
+            )
+        )
+        for row in meals[:5]:
+            lines.append(
+                "- {date}: {meal} | کالری {calories} | پروتئین {protein} گرم".format(
+                    date=row.get("created_at") or "زمان نامشخص",
+                    meal=(row.get("meal") or "وعده نامشخص")[:80],
+                    calories=row.get("calories") if row.get("calories") is not None else "نامشخص",
+                    protein=row.get("protein") if row.get("protein") is not None else "نامشخص",
+                )
+            )
+    else:
+        lines.append("\nگزارش تغذیه‌ای ثبت نشده است.")
+
+    if measurements:
+        lines.append("\nاندازه‌گیری‌های اخیر بدن (جدیدترین ابتدا):")
+        for row in measurements:
+            parts = [
+                f"وزن {row.get('weight')} کیلوگرم" if row.get("weight") is not None else None,
+                f"کمر {row.get('waist')} سانتی‌متر" if row.get("waist") is not None else None,
+                f"سینه {row.get('chest')} سانتی‌متر" if row.get("chest") is not None else None,
+                f"بازو {row.get('arm')} سانتی‌متر" if row.get("arm") is not None else None,
+                f"ران {row.get('thigh')} سانتی‌متر" if row.get("thigh") is not None else None,
+            ]
+            lines.append("- " + (row.get("created_at") or "زمان نامشخص") + ": " + "، ".join(x for x in parts if x))
+    else:
+        lines.append("\nاندازه‌گیری دوره‌ای بدن ثبت نشده است.")
+
+    if checkins:
+        avg_sleep = sum(float(row.get("sleep_hours") or 0) for row in checkins) / len(checkins)
+        avg_energy = sum(float(row.get("energy") or 0) for row in checkins) / len(checkins)
+        avg_soreness = sum(float(row.get("soreness") or 0) for row in checkins) / len(checkins)
+        avg_adherence = sum(float(row.get("adherence") or 0) for row in checkins) / len(checkins)
+        max_soreness = max(int(row.get("soreness") or 0) for row in checkins)
+        lines.append(
+            "\nچک‌این‌های اخیر ({count} مورد): میانگین خواب {sleep:.1f} ساعت، "
+            "انرژی {energy:.1f}/5، کوفتگی {soreness:.1f}/5، پایبندی {adherence:.1f}/5؛ "
+            "بیشترین کوفتگی ثبت‌شده {max_soreness}/5.".format(
+                count=len(checkins), sleep=avg_sleep, energy=avg_energy,
+                soreness=avg_soreness, adherence=avg_adherence,
+                max_soreness=max_soreness,
+            )
+        )
+        for row in checkins[:3]:
+            if row.get("notes"):
+                lines.append("- یادداشت چک‌این: " + str(row["notes"])[:180])
+    else:
+        lines.append("\nچک‌این روزانه ثبت نشده است.")
+
+    if progress:
+        lines.append("\nیادداشت‌های ثبت پیشرفت:")
+        lines.extend("- " + str(item)[:250] for item in progress[:5])
+
+    with db() as c:
+        previous = c.execute(
+            "SELECT content,created_at FROM programs "
+            "WHERE athlete_id=? AND kind='workout' AND status='approved' "
+            "ORDER BY id DESC LIMIT 1",
+            (int(uid),),
+        ).fetchone()
+    if previous:
+        lines.append(
+            "\nآخرین برنامه تمرینی تأییدشده برای جلوگیری از تکرار کورکورانه و بررسی تداوم:"
+        )
+        lines.append(str(previous["content"] or "")[:3500])
+
+    return "\n".join(lines)[:14000]
+
+
+
 def save_body_photo(uid, telegram_file_id, view_type, analysis, consented_at):
     """Store Telegram's file reference and analysis; raw image bytes are never persisted."""
     allowed_views = {"front", "side", "back"}
