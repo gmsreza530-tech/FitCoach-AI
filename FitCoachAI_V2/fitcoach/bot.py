@@ -217,6 +217,9 @@ async def main():
         visual_assessment = latest_body_assessment(m.from_user.id)
         if visual_assessment:
             p["visual_assessment"] = visual_assessment
+        training_context = build_athlete_training_context(m.from_user.id)
+        if training_context:
+            p["training_history"] = training_context
         if kind == "workout" and _profile_days(p) is None:
             return await m.answer(
                 "برای ساخت برنامه دقیق، تعداد جلسات تمرین در هفته در پروفایلت مشخص یا معتبر نیست. "
@@ -332,6 +335,9 @@ async def main():
         visual_assessment = latest_body_assessment(uid)
         if visual_assessment:
             p["visual_assessment"] = visual_assessment
+        training_context = build_athlete_training_context(uid)
+        if training_context:
+            p["training_history"] = training_context
         history = get_conversation_history(uid, limit=12)
         add_conversation_message(uid, "user", question)
         await m.answer("در حال بررسی سؤالت... ⏳")
