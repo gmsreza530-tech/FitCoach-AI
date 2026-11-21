@@ -67,6 +67,24 @@ class DatabaseBackendTests(unittest.TestCase):
         self.assertEqual(database.get_program(program_id)["content"], "plan text")
         self.assertEqual(database.stats()[0], 1)
 
+    def test_staff_personal_program_does_not_require_subscription(self):
+        uid = 9876543211
+        database.save_profile(uid, {
+            "name": "Coach", "age": 30, "sex": "—", "height": 180,
+            "weight": 80, "goal": "strength", "experience": "advanced",
+            "equipment": "gym", "days": 4, "recovery": "good",
+            "limitations": "none", "medication": "none", "notes": "",
+        })
+        with patch.object(database, "FREE_MODE", False), patch.object(
+            database, "ADMIN_IDS", {uid}
+        ):
+            program_id, ok, message = database.create_program_with_quota(
+                uid, uid, "workout", "personal plan", "complete plan", "approved"
+            )
+        self.assertTrue(ok, message)
+        self.assertIsNotNone(program_id)
+        self.assertEqual(database.get_program(program_id)["coach_id"], uid)
+
     def test_init_is_idempotent(self):
         database.init()
         database.init()
