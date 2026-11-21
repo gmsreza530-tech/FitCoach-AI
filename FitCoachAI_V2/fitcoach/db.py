@@ -13,6 +13,8 @@ from fitcoach.config import (
     SUBSCRIPTION_DAYS,
     SUBSCRIPTION_PLAN_LIMIT,
     FREE_MODE,
+    COACH_IDS,
+    ADMIN_IDS,
 )
 
 
@@ -548,7 +550,10 @@ def search_knowledge(coach_id, query, limit=7):
 def create_program_with_quota(uid, coach_id, kind, request, content, status):
     """Atomically charge one plan and persist its completed program."""
     with db() as c:
-        if not FREE_MODE:
+        # Internal coach/admin accounts can create personal plans without an athlete subscription.
+        # Regular athletes remain subject to the normal subscription and quota checks.
+        is_staff = int(uid) in COACH_IDS or int(uid) in ADMIN_IDS
+        if not FREE_MODE and not is_staff:
             timestamp = datetime.now(timezone.utc)
             access = c.execute(
                 "SELECT expires_at FROM access WHERE athlete_id=?", (int(uid),)
