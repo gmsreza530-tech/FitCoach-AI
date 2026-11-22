@@ -32,6 +32,15 @@ class CoachEngineTests(unittest.TestCase):
         )
         self.assertTrue(any("خارج از بازه معتبر" in item for item in result["data_quality_warnings"]))
 
+    def test_real_workout_line_produces_hold_decision_for_invalid_rir(self):
+        result = analyze_training_safety(
+            training_history="- 2026-11-22T17:37:10+00:00: زیر سینه دمبل | ست: 4 | تکرار: 12.12.10.10 | وزنه: 20.0 کیلوگرم | RIR: 10.0 | یادداشت: سرشونم درد میومد"
+        )
+        self.assertTrue(result["progression_decisions"])
+        self.assertEqual(result["progression_decisions"][0]["decision"], "stop_and_review")
+        self.assertEqual(result["region"], "shoulder")
+
+
 
     def test_valid_rir_does_not_auto_increase_load(self):
         result = progression_guidance("پرس سینه", 20, "۱۲،۱۲،۱۰", 2)
