@@ -421,11 +421,11 @@ async def main():
     async def wl4(m: Message, state: FSMContext):
         try: v=float(m.text.replace(",",".")); assert 0<=v<=1000
         except: return await m.answer("وزنه معتبر وارد کن.")
-        await state.update_data(weight=v); await state.set_state(WorkoutLogForm.rir); await m.answer("RIR چند بود؟ عدد ۰ تا 10 یا نامشخص")
+        await state.update_data(weight=v); await state.set_state(WorkoutLogForm.rir); await m.answer("RIR چند بود؟ عدد ۰ تا ۵ یا «نامشخص». اگر مطمئن نیستی، نامشخص را انتخاب کن.")
     @dp.message(WorkoutLogForm.rir)
     async def wl5(m: Message, state: FSMContext):
-        try: v=None if "نامشخص" in m.text else float(m.text.replace(",",".")); assert v is None or 0<=v<=10
-        except: return await m.answer("RIR باید بین ۰ تا ۱۰ یا نامشخص باشد.")
+        try: v=None if "نامشخص" in m.text else float(m.text.replace(",",".")); assert v is None or 0<=v<=5
+        except: return await m.answer("RIR باید بین ۰ تا ۵ یا نامشخص باشد.")
         await state.update_data(rir=v); await state.set_state(WorkoutLogForm.notes); await m.answer("یادداشت یا میزان درد/ناراحتی؟ اگر نداری بنویس خیر.")
     @dp.message(WorkoutLogForm.notes)
     async def wl6(m: Message, state: FSMContext):
