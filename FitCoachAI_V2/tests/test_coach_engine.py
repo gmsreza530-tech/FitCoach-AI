@@ -26,6 +26,13 @@ class CoachEngineTests(unittest.TestCase):
         self.assertFalse(result["usable"])
         self.assertIn("۰ تا ۵", result["reason"])
 
+    def test_invalid_rir_is_flagged_in_real_history(self):
+        result = analyze_training_safety(
+            training_history="تمرین ثبت‌شده: پرس | RIR: 10.0 | یادداشت: بدون درد"
+        )
+        self.assertTrue(any("خارج از بازه معتبر" in item for item in result["data_quality_warnings"]))
+
+
     def test_valid_rir_does_not_auto_increase_load(self):
         result = progression_guidance("پرس سینه", 20, "۱۲،۱۲،۱۰", 2)
         self.assertEqual(result["decision"], "observe")
