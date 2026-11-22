@@ -55,6 +55,23 @@ class WorkoutQualityTests(unittest.TestCase):
         warnings = validate_workout_plan(make_plan(), {"limitations": "آسیب زانو"})
         self.assertTrue(any("محدودیت پزشکی" in item for item in warnings))
 
+    def test_blocked_pattern_is_hard_rejected(self):
+        profile = {"safety_context": {"blocked_patterns": ["horizontal_push"]}}
+        with self.assertRaisesRegex(WorkoutFormatError, "الگوی حرکتی ممنوع"):
+            validate_workout_plan(make_plan(), profile)
+
+    def test_safety_flag_requires_coach_review(self):
+        profile = {"safety_context": {"requires_coach_review": True}}
+        warnings = validate_workout_plan(make_plan(), profile)
+        self.assertTrue(any("بازبینی مربی" in item for item in warnings))
+
+    def test_exercise_name_is_standardized(self):
+        plan = make_plan()
+        plan["weekly_schedule"][0]["exercises"][0]["name"] = "پرس دمبل زیر سینه"
+        result = format_workout_plan(plan)
+        self.assertIn("پرس بالا سینه دمبل", result)
+
+
 
 if __name__ == "__main__":
     unittest.main()

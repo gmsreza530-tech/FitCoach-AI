@@ -16,6 +16,22 @@ MUSCLE_GROUPS = {
 }
 PUSH_PATTERNS = {"horizontal_push", "vertical_push"}
 PULL_PATTERNS = {"horizontal_pull", "vertical_pull"}
+EXERCISE_NAME_FIXES = {
+    "پرس دمبل زیر سینه": "پرس بالا سینه دمبل",
+    "بارفیکس دمبل": "زیربغل دمبل تک‌دست",
+    "بارفیکس دمبل خم": "زیربغل دمبل خم",
+    "کابل ردیف نشسته": "قایقی سیم‌کش نشسته",
+    "خم شدن پا با دستگاه": "پشت پا دستگاه",
+    "کال‌ف ایستاده": "ساق پا ایستاده",
+    "ددلیفت رومانی": "ددلیفت رومانیایی",
+}
+
+
+def _canonical_exercise_name(value: Any) -> str:
+    name = str(value or "").strip()
+    return EXERCISE_NAME_FIXES.get(name, name)
+
+
 ADVANCED_BEGINNER_BLOCKLIST = (
     "weighted pull", "بارفیکس با وزنه", "muscle-up", "ماسل‌آپ",
     "snatch", "اسنچ", "clean and jerk", "کلین اند جرک",
@@ -131,7 +147,8 @@ def validate_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -
         for ex_index, exercise in enumerate(exercises, start=1):
             if not isinstance(exercise, dict):
                 raise WorkoutFormatError(f"حرکت {ex_index} در {day_name} معتبر نیست.")
-            name = _clean(exercise.get("name"), "نام حرکت", max_length=120)
+            name = _canonical_exercise_name(_clean(exercise.get("name"), "نام حرکت", max_length=120))
+            exercise["name"] = name
             normalized_name = re.sub(r"[^a-z0-9آ-ی]", "", unicodedata.normalize("NFKC", name).lower())
             if normalized_name in seen_names:
                 raise WorkoutFormatError(f"حرکت «{name}» در روز «{day_name}» تکراری است.")
@@ -169,6 +186,14 @@ def validate_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -
 
         focus_is_push = "push" in focus or "فشار" in focus
         focus_is_pull = "pull" in focus or "کشش" in focus
+        safety = profile.get("safety_context") or {}
+        blocked_patterns = set(safety.get("blocked_patterns") or [])
+        prohibited = blocked_patterns.intersection(day_patterns)
+        if prohibited:
+            raise WorkoutFormatError(
+                f"روز «{day_name}» شامل الگوی حرکتی ممنوع به‌دلیل محدودیت ثبت‌شده است: {', '.join(sorted(prohibited))}."
+            )
+
         if focus_is_push and any(pattern in PULL_PATTERNS for pattern in day_patterns):
             raise WorkoutFormatError(f"روز «{day_name}» با تمرکز Push شامل حرکت کششی است.")
         if focus_is_pull and any(pattern in PUSH_PATTERNS for pattern in day_patterns):
@@ -185,6 +210,11 @@ def validate_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -
     no_flags = {"", "خیر", "ندارد", "none", "no"}
     if limitations not in no_flags or medication not in no_flags:
         warnings.append("پروفایل شامل محدودیت پزشکی یا دارو است؛ برنامه باید پیش از اجرا توسط متخصص مربوطه بررسی شود.")
+    safety = profile.get("safety_context") or {}
+    if safety.get("requires_coach_review"):
+        warnings.append("به‌دلیل درد، محدودیت یا داروی ثبت‌شده، بازبینی مربی/متخصص پیش از اجرا لازم است.")
+    for item in safety.get("data_quality_warnings") or []:
+        warnings.append("کیفیت داده: " + str(item)[:220])
 
     return list(dict.fromkeys(warnings))
 
@@ -272,6 +302,7 @@ def format_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -> 
             lines.append(f"   • ست: {sets}  |  تکرار: {reps}")
             lines.append(f"   • استراحت: {rest}" + (f"  |  RIR: {rir}" if rir else ""))
             if note:
+                note = note.replace("هشتن از زانوها", "زانوها در راستای پنجه پا حرکت کنند؛ دامنه بدون درد و کنترل‌شده باشد")
                 lines.append(f"   • نکته اجرا: {note}")
         day_note = _clean(day.get("note"), "نکته روز", required=False, max_length=250)
         if day_note:

@@ -12,6 +12,7 @@ from fitcoach.ai import ask, analyze_body_photo
 from fitcoach.program_formatter import format_workout_plan, validate_workout_plan, WorkoutFormatError, _profile_days
 from fitcoach.excel_import import import_excel
 from fitcoach.video_analysis import analyze_video
+from fitcoach.coach_engine import analyze_training_safety
 
 class Form(StatesGroup):
     name=State(); age=State(); sex=State(); height=State(); weight=State()
@@ -220,6 +221,17 @@ async def main():
         training_context = build_athlete_training_context(m.from_user.id)
         if training_context:
             p["training_history"] = training_context
+        if kind == "workout":
+            safety = analyze_training_safety(
+                p.get("limitations"), p.get("medication"), p.get("training_history")
+            )
+            if safety["needs_clarification"]:
+                return await m.answer(
+                    "⛔ قبل از ساخت برنامه باید وضعیت درد/ناراحتی روشن شود. "
+                    "لطفاً مشخص کن درد دقیقاً کدام ناحیه بدن است و آیا اکنون هم وجود دارد؟ "
+                    "تا روشن‌شدن موضوع، برنامه جدید تولید نمی‌کنم."
+                )
+            p["safety_context"] = safety
         if kind == "workout" and _profile_days(p) is None:
             return await m.answer(
                 "برای ساخت برنامه دقیق، تعداد جلسات تمرین در هفته در پروفایلت مشخص یا معتبر نیست. "
@@ -409,11 +421,11 @@ async def main():
     async def wl4(m: Message, state: FSMContext):
         try: v=float(m.text.replace(",",".")); assert 0<=v<=1000
         except: return await m.answer("وزنه معتبر وارد کن.")
-        await state.update_data(weight=v); await state.set_state(WorkoutLogForm.rir); await m.answer("RIR چند بود؟ عدد ۰ تا 10 یا نامشخص")
+        await state.update_data(weight=v); await state.set_state(WorkoutLogForm.rir); await m.answer("RIR چند بود؟ عدد ۰ تا ۵ یا «نامشخص». اگر مطمئن نیستی، نامشخص را انتخاب کن.")
     @dp.message(WorkoutLogForm.rir)
     async def wl5(m: Message, state: FSMContext):
-        try: v=None if "نامشخص" in m.text else float(m.text.replace(",",".")); assert v is None or 0<=v<=10
-        except: return await m.answer("RIR باید بین ۰ تا ۱۰ یا نامشخص باشد.")
+        try: v=None if "نامشخص" in m.text else float(m.text.replace(",",".")); assert v is None or 0<=v<=5
+        except: return await m.answer("RIR باید بین ۰ تا ۵ یا نامشخص باشد.")
         await state.update_data(rir=v); await state.set_state(WorkoutLogForm.notes); await m.answer("یادداشت یا میزان درد/ناراحتی؟ اگر نداری بنویس خیر.")
     @dp.message(WorkoutLogForm.notes)
     async def wl6(m: Message, state: FSMContext):
