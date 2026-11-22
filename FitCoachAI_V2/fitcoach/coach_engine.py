@@ -35,8 +35,10 @@ def analyze_training_safety(
 ) -> Dict[str, Any]:
     """Extract conservative exercise constraints from declared limits and recent logs."""
     source = "\n".join((_text(limitations), _text(training_history)))
-    no_pain_override = _contains_any(source, NO_PAIN)
-    has_pain_signal = _contains_any(source, PAIN_WORDS) and not no_pain_override
+    for phrase in NO_PAIN:
+        source = source.replace(phrase, "")
+    pain_context = "\n".join(line for line in source.splitlines() if _contains_any(line, PAIN_WORDS))
+    has_pain_signal = bool(pain_context)
 
     region = None
     blocked_patterns: List[str] = []
@@ -73,7 +75,7 @@ def analyze_training_safety(
             reason = "درد یا ناراحتی ثبت شده اما محل آن مشخص نیست؛ پیش از طراحی برنامه باید محل و وضعیت آن روشن شود."
 
     data_quality_warnings = []
-    for match in re.finditer(r"RIR\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)", str(training_history or ""), re.IGNORECASE):
+    for match in re.finditer(r"RIR\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)", str(training_history or ""), re.IGNORECASE):
         rir_check = classify_rir(match.group(1))
         if not rir_check["usable"]:
             data_quality_warnings.append(rir_check["reason"])
