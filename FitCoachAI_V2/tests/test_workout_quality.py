@@ -7,6 +7,7 @@ def make_plan(push_pattern="horizontal_push", push_focus="Push"):
     return {
         "title": "برنامه آزمایشی",
         "goal": "افزایش قدرت",
+        "adaptation_notes": ["برای این تست سابقه تمرینی قابل مقایسه‌ای ارائه نشده است؛ بار تمرین حدس زده نمی‌شود."],
         "weekly_schedule": [
             {
                 "day": "روز اول",

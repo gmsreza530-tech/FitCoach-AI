@@ -96,6 +96,13 @@ def validate_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -
     """
     data = _extract_json(payload)
     profile = profile or {}
+    adaptation_notes = data.get("adaptation_notes")
+    if not isinstance(adaptation_notes, list) or not 1 <= len(adaptation_notes) <= 5:
+        raise WorkoutFormatError(
+            "بخش توضیح تطبیق با سوابق (۱ تا ۵ نکته) وجود ندارد یا معتبر نیست."
+        )
+    if any(not isinstance(note, str) or not note.strip() for note in adaptation_notes):
+        raise WorkoutFormatError("توضیح تطبیق با سوابق نباید خالی باشد.")
     days = data.get("weekly_schedule")
     if not isinstance(days, list) or not 1 <= len(days) <= 7:
         raise WorkoutFormatError("تعداد روزهای برنامه باید بین ۱ تا ۷ باشد.")
@@ -202,6 +209,48 @@ def format_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -> 
     meta = [item for item in (f"👤 {name}" if name else "", f"📊 سطح: {level}" if level else "", f"🏟 تجهیزات: {equipment}" if equipment else "") if item]
     if meta:
         lines.extend(meta)
+
+    # Show the exact athlete records supplied to the model so the athlete and
+    # coach can verify the evidence used for personalization.
+    training_history = str(profile.get("training_history") or "").strip()
+    if training_history:
+        evidence_lines = []
+        capture = False
+        for raw_line in training_history.splitlines():
+            line = raw_line.strip()
+            if not line:
+                if capture:
+                    break
+                continue
+            if line.startswith("تمرین‌های ثبت‌شده اخیر"):
+                capture = True
+                evidence_lines.append(line)
+                continue
+            if capture:
+                if line.startswith(("تغذیه:", "اندازه‌گیری‌های اخیر", "چک‌این‌های اخیر", "یادداشت‌های ثبت پیشرفت", "آخرین برنامه")):
+                    break
+                if line.startswith("-"):
+                    evidence_lines.append(line)
+                    if len(evidence_lines) >= 7:
+                        break
+        for section in ("چک‌این‌های اخیر", "اندازه‌گیری‌های اخیر بدن"):
+            for raw_line in training_history.splitlines():
+                if raw_line.strip().startswith(section):
+                    evidence_lines.append(raw_line.strip())
+                    break
+        if evidence_lines:
+            lines.extend(["", "📊 داده‌های واقعی ثبت‌شده برای شخصی‌سازی"])
+            lines.extend("• " + item[:260] for item in evidence_lines[:9])
+
+    adaptation_notes = data.get("adaptation_notes") or []
+    if isinstance(adaptation_notes, str):
+        adaptation_notes = [adaptation_notes]
+    if isinstance(adaptation_notes, list) and adaptation_notes:
+        lines.extend(["", "🧠 منطق تطبیق برنامه با سوابق"])
+        for item in adaptation_notes[:5]:
+            note = _clean(item, "توضیح تطبیق", required=False, max_length=300)
+            if note:
+                lines.append("• " + note)
 
     warmup = _clean(data.get("warmup"), "گرم‌کردن", required=False, max_length=500)
     if warmup:
