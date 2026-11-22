@@ -12,6 +12,7 @@ from fitcoach.ai import ask, analyze_body_photo
 from fitcoach.program_formatter import format_workout_plan, validate_workout_plan, WorkoutFormatError, _profile_days
 from fitcoach.excel_import import import_excel
 from fitcoach.video_analysis import analyze_video
+from fitcoach.coach_engine import analyze_training_safety
 
 class Form(StatesGroup):
     name=State(); age=State(); sex=State(); height=State(); weight=State()
@@ -220,6 +221,17 @@ async def main():
         training_context = build_athlete_training_context(m.from_user.id)
         if training_context:
             p["training_history"] = training_context
+        if kind == "workout":
+            safety = analyze_training_safety(
+                p.get("limitations"), p.get("medication"), p.get("training_history")
+            )
+            if safety["needs_clarification"]:
+                return await m.answer(
+                    "⛔ قبل از ساخت برنامه باید وضعیت درد/ناراحتی روشن شود. "
+                    "لطفاً مشخص کن درد دقیقاً کدام ناحیه بدن است و آیا اکنون هم وجود دارد؟ "
+                    "تا روشن‌شدن موضوع، برنامه جدید تولید نمی‌کنم."
+                )
+            p["safety_context"] = safety
         if kind == "workout" and _profile_days(p) is None:
             return await m.answer(
                 "برای ساخت برنامه دقیق، تعداد جلسات تمرین در هفته در پروفایلت مشخص یا معتبر نیست. "
