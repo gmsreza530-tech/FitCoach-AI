@@ -78,7 +78,7 @@ def analyze_training_safety(
     progression_decisions = []
     # Validate every RIR mention, including compact summaries that do not use
     # the full workout-log line format.
-    for match in re.finditer(r"RIR\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)", str(training_history or ""), re.IGNORECASE):
+    for match in re.finditer(r"RIR\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)", str(training_history or ""), re.IGNORECASE):
         rir_check = classify_rir(match.group(1))
         if not rir_check["usable"]:
             data_quality_warnings.append(rir_check["reason"])
