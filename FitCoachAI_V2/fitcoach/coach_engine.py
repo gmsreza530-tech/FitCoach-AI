@@ -79,9 +79,9 @@ def analyze_training_safety(
     for line in str(training_history or "").splitlines():
         if not line.lstrip().startswith("- ") or "| ست:" not in line:
             continue
-        exercise_match = re.search(r":\\s*([^|]+)\\s*\\|\\s*ست:", line)
+        exercise_match = re.search(r":\s*([^|]+)\s*\|\s*ست:", line)
         fields = re.search(
-            r"\\|\\s*ست:\\s*([^|]+)\\|\\s*تکرار:\\s*([^|]+)\\|\\s*وزنه:\\s*([^ ]+)\\s*کیلوگرم\\s*\\|\\s*RIR:\\s*([^|]+)\\|\\s*یادداشت:\\s*(.*)",
+            r"\|\s*ست:\s*([^|]+)\|\s*تکرار:\s*([^|]+)\|\s*وزنه:\s*([^ ]+)\s*کیلوگرم\s*\|\s*RIR:\s*([^|]+)\|\s*یادداشت:\s*(.*)",
             line,
         )
         if not exercise_match or not fields:
