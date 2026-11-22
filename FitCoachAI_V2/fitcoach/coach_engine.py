@@ -75,10 +75,31 @@ def analyze_training_safety(
             reason = "درد یا ناراحتی ثبت شده اما محل آن مشخص نیست؛ پیش از طراحی برنامه باید محل و وضعیت آن روشن شود."
 
     data_quality_warnings = []
-    for match in re.finditer(r"RIR\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)", str(training_history or ""), re.IGNORECASE):
-        rir_check = classify_rir(match.group(1))
-        if not rir_check["usable"]:
-            data_quality_warnings.append(rir_check["reason"])
+    progression_decisions = []
+    for line in str(training_history or "").splitlines():
+        if not line.lstrip().startswith("- ") or "| ست:" not in line:
+            continue
+        exercise_match = re.search(r":\\s*([^|]+)\\s*\\|\\s*ست:", line)
+        fields = re.search(
+            r"\\|\\s*ست:\\s*([^|]+)\\|\\s*تکرار:\\s*([^|]+)\\|\\s*وزنه:\\s*([^ ]+)\\s*کیلوگرم\\s*\\|\\s*RIR:\\s*([^|]+)\\|\\s*یادداشت:\\s*(.*)",
+            line,
+        )
+        if not exercise_match or not fields:
+            continue
+        exercise = exercise_match.group(1).strip()
+        sets, reps, weight, rir, notes = (
+            fields.group(1).strip(), fields.group(2).strip(),
+            fields.group(3).strip(), fields.group(4).strip(),
+            fields.group(5).strip(),
+        )
+        decision = progression_guidance(
+            exercise, weight, reps, None if rir == "نامشخص" else rir, notes
+        )
+        progression_decisions.append(decision)
+        if not decision["rir"]["usable"] and rir != "نامشخص":
+            data_quality_warnings.append(decision["rir"]["reason"])
+        if len(progression_decisions) >= 8:
+            break
     med = _text(medication)
     medication_flag = med not in ("", "خیر", "ندارد", "no", "none", "مصرف نمی‌کنم")
     return {
@@ -90,6 +111,7 @@ def analyze_training_safety(
         "requires_coach_review": bool(has_pain_signal or medication_flag or _text(limitations) not in ("", "خیر", "ندارد", "no", "none")),
         "medication_declared": medication_flag,
         "data_quality_warnings": list(dict.fromkeys(data_quality_warnings)),
+        "progression_decisions": progression_decisions,
     }
 
 
