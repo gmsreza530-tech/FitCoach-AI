@@ -96,6 +96,13 @@ def validate_workout_plan(payload: Any, profile: Dict[str, Any] | None = None) -
     """
     data = _extract_json(payload)
     profile = profile or {}
+    adaptation_notes = data.get("adaptation_notes")
+    if not isinstance(adaptation_notes, list) or not 1 <= len(adaptation_notes) <= 5:
+        raise WorkoutFormatError(
+            "بخش توضیح تطبیق با سوابق (۱ تا ۵ نکته) وجود ندارد یا معتبر نیست."
+        )
+    if any(not isinstance(note, str) or not note.strip() for note in adaptation_notes):
+        raise WorkoutFormatError("توضیح تطبیق با سوابق نباید خالی باشد.")
     days = data.get("weekly_schedule")
     if not isinstance(days, list) or not 1 <= len(days) <= 7:
         raise WorkoutFormatError("تعداد روزهای برنامه باید بین ۱ تا ۷ باشد.")
