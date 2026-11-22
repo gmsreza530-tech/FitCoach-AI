@@ -72,6 +72,11 @@ def analyze_training_safety(
             needs_clarification = True
             reason = "درد یا ناراحتی ثبت شده اما محل آن مشخص نیست؛ پیش از طراحی برنامه باید محل و وضعیت آن روشن شود."
 
+    data_quality_warnings = []
+    for match in re.finditer(r"RIR\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)", str(training_history or ""), re.IGNORECASE):
+        rir_check = classify_rir(match.group(1))
+        if not rir_check["usable"]:
+            data_quality_warnings.append(rir_check["reason"])
     med = _text(medication)
     medication_flag = med not in ("", "خیر", "ندارد", "no", "none", "مصرف نمی‌کنم")
     return {
@@ -82,6 +87,7 @@ def analyze_training_safety(
         "needs_clarification": needs_clarification,
         "requires_coach_review": bool(has_pain_signal or medication_flag or _text(limitations) not in ("", "خیر", "ندارد", "no", "none")),
         "medication_declared": medication_flag,
+        "data_quality_warnings": list(dict.fromkeys(data_quality_warnings)),
     }
 
 
