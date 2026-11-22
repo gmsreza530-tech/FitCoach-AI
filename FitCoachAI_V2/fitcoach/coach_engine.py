@@ -14,10 +14,10 @@ NO_PAIN = ("بدون درد", "درد ندارم", "بدون درد و نارا�
 PAIN_WORDS = ("درد", "دردناک", "ناراحتی", "آسیب", "pain", "injury", "hurt")
 SHOULDER_WORDS = ("شانه", "سرشانه", "شون", "کتف", "shoulder", "rotator cuff")
 KNEE_WORDS = ("زانو", "knee")
-BACK_WORDS = ("کمر", "پشت", "ستون فقرات", "back", "spine")
+BACK_WORDS = ("کمر", "ستون فقرات", "lower back", "spine")
 ELBOW_WORDS = ("آرنج", "elbow")
 WRIST_WORDS = ("مچ", "wrist")
-HIP_WORDS = ("لگن", "ران", "hip")
+HIP_WORDS = ("لگن", "hip")
 
 
 def _text(value: Any) -> str:
@@ -44,27 +44,27 @@ def analyze_training_safety(
     needs_clarification = False
 
     if has_pain_signal:
-        if _contains_any(source, SHOULDER_WORDS):
+        if _contains_any(pain_context, SHOULDER_WORDS):
             region = "shoulder"
             blocked_patterns = sorted(PUSH_PULL_PATTERNS)
             reason = "در سوابق، درد یا ناراحتی ناحیه شانه/سرشانه ثبت شده است."
-        elif _contains_any(source, KNEE_WORDS):
+        elif _contains_any(pain_context, KNEE_WORDS):
             region = "knee"
             blocked_patterns = ["squat", "lunge", "power"]
             reason = "در سوابق، درد یا ناراحتی زانو ثبت شده است."
-        elif _contains_any(source, BACK_WORDS):
+        elif _contains_any(pain_context, BACK_WORDS):
             region = "back"
             blocked_patterns = ["hinge", "squat", "carry", "power"]
             reason = "در سوابق، درد یا ناراحتی کمر/پشت ثبت شده است."
-        elif _contains_any(source, ELBOW_WORDS):
+        elif _contains_any(pain_context, ELBOW_WORDS):
             region = "elbow"
             blocked_patterns = sorted(PUSH_PULL_PATTERNS)
             reason = "در سوابق، درد یا ناراحتی آرنج ثبت شده است."
-        elif _contains_any(source, WRIST_WORDS):
+        elif _contains_any(pain_context, WRIST_WORDS):
             region = "wrist"
             blocked_patterns = sorted(PUSH_PULL_PATTERNS)
             reason = "در سوابق، درد یا ناراحتی مچ ثبت شده است."
-        elif _contains_any(source, HIP_WORDS):
+        elif _contains_any(pain_context, HIP_WORDS):
             region = "hip"
             blocked_patterns = ["squat", "hinge", "lunge", "power"]
             reason = "در سوابق، درد یا ناراحتی لگن/ران ثبت شده است."
