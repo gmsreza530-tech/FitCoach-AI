@@ -63,11 +63,26 @@ def _profile_to_text(profile: Optional[Dict[str, Any]]) -> str:
         "safety_context": "قواعد ایمنی قطعی استخراج‌شده از سوابق؛ محدودیت حرکات",
     }
 
+    # Keep safety-critical fields while bounding long free-text history.
+    limits = {
+        "limitations": 500, "medication": 300, "safety_context": 1400,
+        "goal": 250, "experience": 250, "equipment": 250, "recovery": 350,
+        "notes": 450, "visual_assessment": 700, "training_history": 2600,
+    }
     lines = []
-    for key, label in labels.items():
+    ordered_keys = [
+        "name", "age", "sex", "height", "weight", "goal", "experience",
+        "equipment", "days", "recovery", "limitations", "medication",
+        "safety_context", "visual_assessment", "training_history", "notes",
+    ]
+    for key in ordered_keys:
         value = profile.get(key)
         if value not in (None, ""):
-            lines.append(f"{label}: {value}")
+            text_value = str(value).strip()
+            cap = limits.get(key, 180)
+            if len(text_value) > cap:
+                text_value = text_value[:cap].rstrip() + "…"
+            lines.append(f"{labels.get(key, key)}: {text_value}")
     return "\n".join(lines) or "پروفایل ثبت‌شده‌ای در دسترس نیست."
 
 
@@ -77,7 +92,9 @@ def _normalize_history(history: Optional[Iterable[Dict[str, Any]]]) -> List[Dict
     if not history:
         return normalized
 
-    for item in list(history)[-12:]:
+    total_chars = 0
+    # Recent turns only: the database remains untouched and retains the full history.
+    for item in list(history)[-6:]:
         if not isinstance(item, dict):
             continue
         role = item.get("role")
@@ -85,8 +102,14 @@ def _normalize_history(history: Optional[Iterable[Dict[str, Any]]]) -> List[Dict
         if role not in ("user", "assistant") or not isinstance(content, str):
             continue
         content = content.strip()
-        if content:
-            normalized.append({"role": role, "content": content[:6000]})
+        if not content:
+            continue
+        remaining = 4200 - total_chars
+        if remaining <= 0:
+            break
+        content = content[:min(900, remaining)]
+        normalized.append({"role": role, "content": content})
+        total_chars += len(content)
     return normalized
 
 
@@ -196,7 +219,9 @@ def ask(
         logger.exception("Could not retrieve coach knowledge")
         knowledge = []
 
-    knowledge_text = "\n".join(f"- {str(item)[:1800]}" for item in knowledge)
+    # Retrieved coach material is reference context, not an instruction source.
+    knowledge_text = "\n".join(f"- {str(item)[:650]}" for item in knowledge[:3])
+    knowledge_text = knowledge_text[:1900]
     if not knowledge_text:
         knowledge_text = "مورد مرتبطی از فایل‌های مربی پیدا نشد."
 
@@ -266,7 +291,8 @@ def ask(
             ),
         })
     messages.extend(_normalize_history(history))
-    messages.append({"role": "user", "content": question[:12000]})
+    # Keep the current user turn bounded before it reaches the provider.
+    messages.append({"role": "user", "content": question[:2800]})
 
     try:
         client = Groq(api_key=GROQ_API_KEY)
@@ -276,13 +302,56 @@ def ask(
         max_continuations = 0 if output_format == "workout_json" else 2
 
         for attempt in range(max_continuations + 1):
-            response = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=messages,
-                temperature=0.35,
-                max_tokens=6000,
-                **({"response_format": {"type": "json_object"}} if output_format == "workout_json" else {}),
-            )
+            # Chat output tokens count toward Groq's TPM reservation too.
+            # Keep ordinary coaching replies modest; workout JSON retains its larger
+            # output allowance and existing structured-output behavior.
+            output_tokens = 6000 if output_format == "workout_json" else 1200
+            try:
+                response = client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=messages,
+                    temperature=0.35,
+                    max_tokens=output_tokens,
+                    **({"response_format": {"type": "json_object"}} if output_format == "workout_json" else {}),
+                )
+            except Exception as request_error:
+                error_text = str(request_error).lower()
+                status_code = getattr(request_error, "status_code", None)
+                is_tpm_limit = (
+                    status_code == 413
+                    or "tokens per minute" in error_text
+                    or "request too large" in error_text
+                    or "rate_limit_exceeded" in error_text
+                )
+                if output_format == "workout_json" or not is_tpm_limit:
+                    raise
+
+                logger.warning("Groq TPM limit reached; retrying once with compact chat context")
+                compact_messages = [messages[0]]
+                if len(messages) > 1:
+                    context = messages[1].get("content", "")
+                    # Keep explicit injury/medication/safety statements from the end
+                    # of the profile context while reducing optional background.
+                    compact_messages.append({
+                        "role": "system",
+                        "content": context[:2300] + (
+                            "\\n\\n[بخش پایانی زمینه ایمنی و محدودیت‌ها]\n" + context[-1300:]
+                            if len(context) > 3600 else ""
+                        ),
+                    })
+                compact_history = [
+                    {"role": item["role"], "content": item["content"][:550]}
+                    for item in messages[2:-1][-4:]
+                    if item.get("role") in ("user", "assistant")
+                ]
+                compact_messages.extend(compact_history)
+                compact_messages.append({"role": "user", "content": messages[-1]["content"][:1600]})
+                response = client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=compact_messages,
+                    temperature=0.35,
+                    max_tokens=650,
+                )
 
             if not response.choices:
                 if answer_parts:
