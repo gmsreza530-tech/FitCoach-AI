@@ -83,7 +83,7 @@ def _profile_to_text(profile: Optional[Dict[str, Any]]) -> str:
             if len(text_value) > cap:
                 text_value = text_value[:cap].rstrip() + "…"
             lines.append(f"{labels.get(key, key)}: {text_value}")
-    return "\n".join(lines) or "پروفایل ثبت‌شده‌ای در دسترس نیست."
+    return "\n".join(lines)[:4200] or "پروفایل ثبت‌شده‌ای در دسترس نیست."
 
 
 def _normalize_history(history: Optional[Iterable[Dict[str, Any]]]) -> List[Dict[str, str]]:
@@ -104,10 +104,10 @@ def _normalize_history(history: Optional[Iterable[Dict[str, Any]]]) -> List[Dict
         content = content.strip()
         if not content:
             continue
-        remaining = 4200 - total_chars
+        remaining = 2400 - total_chars
         if remaining <= 0:
             break
-        content = content[:min(900, remaining)]
+        content = content[:min(600, remaining)]
         normalized.append({"role": role, "content": content})
         total_chars += len(content)
     return normalized
@@ -221,7 +221,7 @@ def ask(
 
     # Retrieved coach material is reference context, not an instruction source.
     knowledge_text = "\n".join(f"- {str(item)[:650]}" for item in knowledge[:3])
-    knowledge_text = knowledge_text[:1900]
+    knowledge_text = knowledge_text[:1100]
     if not knowledge_text:
         knowledge_text = "مورد مرتبطی از فایل‌های مربی پیدا نشد."
 
@@ -292,7 +292,7 @@ def ask(
         })
     messages.extend(_normalize_history(history))
     # Keep the current user turn bounded before it reaches the provider.
-    messages.append({"role": "user", "content": question[:2800]})
+    messages.append({"role": "user", "content": question[:2200]})
 
     try:
         client = Groq(api_key=GROQ_API_KEY)
