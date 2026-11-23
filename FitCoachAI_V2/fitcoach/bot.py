@@ -338,7 +338,7 @@ async def main():
         question = (m.text or "").strip()
         if not question:
             return await m.answer("لطفاً پیام متنی بفرست.")
-        question = question[:12000]
+        question = question[:6000]
         # Staff accounts use their own coach scope for personal AI chat;
         # regular athletes must have an assigned coach.
         coach_id = uid if is_coach(uid) else athlete_coach(uid)
@@ -350,7 +350,7 @@ async def main():
         training_context = build_athlete_training_context(uid)
         if training_context:
             p["training_history"] = training_context
-        history = get_conversation_history(uid, limit=12)
+        history = get_conversation_history(uid, limit=6)
         add_conversation_message(uid, "user", question)
         await m.answer("در حال بررسی سؤالت... ⏳")
         try:
